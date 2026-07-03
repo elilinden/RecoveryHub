@@ -305,7 +305,7 @@ function greetingFromDate(iso: string) {
 
 function TabCount({ value }: { value: number }) {
   if (value === 0) return null;
-  return <span className="rounded-full bg-background px-1.5 py-0.5 text-xs font-semibold text-foreground group-data-active/tabs-list:bg-primary/10">{value}</span>;
+  return <span className="tab-count rounded-full bg-background px-1.5 py-0.5 text-xs font-semibold text-foreground">{value}</span>;
 }
 
 const todayMetricTone: Record<"urgent" | "warning" | "success" | "neutral", string> = {

@@ -27,7 +27,7 @@ export function MatterTriagePanel({ matterId, activeFlags, resolvedFlags, profil
       <CardContent className="space-y-4 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <SectionHeader
-            description="Rule-based operational and legal warnings. Confirm all legal decisions before acting."
+            description="Automatic checks for this matter. Always confirm legal decisions yourself before acting."
             title="Attention"
           />
           <form action={submitRecheckMatterTriageAction}>
@@ -64,7 +64,7 @@ export function MatterTriagePanel({ matterId, activeFlags, resolvedFlags, profil
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
-                  <span>{flag.isLegalWarning ? "Legal warning" : "Operational reminder"}</span>
+                  <span>{flag.isLegalWarning ? "Legal warning" : "Reminder"}</span>
                   <span>{flag.canSnooze ? "May be snoozed" : "Snooze restricted"}</span>
                   <span>{flag.canOverride ? "Documented override available" : "Override unavailable"}</span>
                   {flag.dismissedUntil ? <span>Snoozed until {flag.dismissedUntil.slice(0, 10)}</span> : null}

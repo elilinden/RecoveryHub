@@ -1,4 +1,3 @@
-import { SectionHeader } from "@/components/common/section-header";
 import { Button } from "@/components/ui/button";
 import { submitUpdateTriageSettingsAction } from "@/lib/triage/actions";
 import { triageSettingDefinitions } from "@/lib/triage/settings";
@@ -13,11 +12,7 @@ export function TriageSettingsForm({ result }: TriageSettingsFormProps) {
   const settings = result.settings;
 
   return (
-    <div className="mt-5 space-y-4">
-      <SectionHeader
-        description="Operational thresholds used by rule-based dashboard triage. These rules support review; they are not legal advice."
-        title="Workflow & Triage"
-      />
+    <div className="mt-5">
       <form action={submitUpdateTriageSettingsAction} className="grid gap-4 rounded-lg border border-border bg-background p-4">
         <div className="grid gap-3 sm:grid-cols-2">
           {triageSettingDefinitions.map((definition) => {

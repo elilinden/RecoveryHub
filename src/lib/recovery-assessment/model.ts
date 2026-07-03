@@ -94,13 +94,13 @@ function factor(
 export const initialGeneralSubrogationModel: RecoveryAssessmentModel = {
   id: "initial-general-subrogation-v1",
   name: "Initial General Subrogation Model",
-  description: "Structured operational defaults for general subrogation matters.",
+  description: "The default scoring weights used for general subrogation matters.",
   matterType: "general",
   version: 1,
   isActive: true,
   effectiveFrom: "2026-07-03",
   effectiveTo: null,
-  notice: "These initial weights are operational defaults and should be reviewed against the firm's actual historical results.",
+  notice: "These starting weights should be reviewed against the firm's actual historical results.",
   recommendationBands: bands,
   factors: [
     factor(1, "liability_strength", "Liability strength", "Liability", 20, "Evaluate the available facts supporting responsibility, including reports, admissions, witness information, comparative fault, and known defenses. The system does not independently determine liability.", [

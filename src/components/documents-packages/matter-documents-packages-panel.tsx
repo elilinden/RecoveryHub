@@ -1,0 +1,312 @@
+import Link from "next/link";
+import { ExternalLink, FileText, PackagePlus } from "lucide-react";
+
+import { CurrencyDisplay } from "@/components/common/currency-display";
+import { DateDisplay } from "@/components/common/date-display";
+import { EmptyState } from "@/components/common/empty-state";
+import { SectionHeader } from "@/components/common/section-header";
+import { DataTableShell } from "@/components/common/data-table-shell";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TableCell, TableRow } from "@/components/ui/table";
+import { submitCreateExternalDocumentLinkAction, submitCreatePackageAction } from "@/lib/documents-packages/actions";
+import {
+  documentTypeLabels,
+  packageTypeLabels,
+  sourceTypeLabels,
+} from "@/lib/documents-packages/labels";
+import type { DocumentPackagePermissions, DocumentTemplate, MatterDocument, OutboundPackage } from "@/lib/documents-packages/types";
+import type { EvidenceItem } from "@/lib/matters-workspace/types";
+import { canPreviewDocument } from "@/lib/documents-packages/storage";
+import { DocumentStatusBadge, PackageStatusBadge, ScanStatusBadge, VerificationBadge, VisibilityBadge } from "@/components/documents-packages/document-package-badges";
+import { DocumentUploadPanel } from "@/components/documents-packages/document-upload-panel";
+
+type MatterDocumentsPackagesPanelProps = {
+  matterId: string;
+  matterAmountSought: number;
+  documents: MatterDocument[];
+  packages: OutboundPackage[];
+  templates: DocumentTemplate[];
+  evidence: EvidenceItem[];
+  permissions: DocumentPackagePermissions;
+};
+
+const documentColumns = [
+  { key: "title", header: "Document", className: "w-[18rem] min-w-[18rem]" },
+  { key: "type", header: "Type", className: "w-[13rem] min-w-[13rem]" },
+  { key: "date", header: "Date", className: "w-[9rem] min-w-[9rem]" },
+  { key: "version", header: "Version", className: "w-[8rem] min-w-[8rem]" },
+  { key: "source", header: "Source", className: "w-[11rem] min-w-[11rem]" },
+  { key: "scan", header: "Scan", className: "w-[10rem] min-w-[10rem]" },
+  { key: "visibility", header: "Visibility", className: "w-[12rem] min-w-[12rem]" },
+  { key: "actions", header: "Actions", className: "w-[12rem] min-w-[12rem]" },
+];
+
+const packageColumns = [
+  { key: "package", header: "Package", className: "w-[18rem] min-w-[18rem]" },
+  { key: "type", header: "Type", className: "w-[12rem] min-w-[12rem]" },
+  { key: "recipient", header: "Recipient", className: "w-[16rem] min-w-[16rem]" },
+  { key: "status", header: "Status", className: "w-[12rem] min-w-[12rem]" },
+  { key: "amount", header: "Amount", className: "w-[10rem] min-w-[10rem] text-right" },
+  { key: "deadline", header: "Response deadline", className: "w-[11rem] min-w-[11rem]" },
+  { key: "updated", header: "Updated", className: "w-[9rem] min-w-[9rem]" },
+];
+
+export function MatterDocumentsPackagesPanel({
+  matterId,
+  matterAmountSought,
+  documents,
+  packages,
+  templates,
+  evidence,
+  permissions,
+}: MatterDocumentsPackagesPanelProps) {
+  return (
+    <Tabs className="space-y-4" defaultValue="documents">
+      <TabsList className="h-auto w-full flex-wrap justify-start rounded-lg border border-border bg-card p-1 [&_[data-slot=tabs-trigger]]:min-h-9 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:px-3">
+        <TabsTrigger value="documents">Documents</TabsTrigger>
+        <TabsTrigger value="packages">Packages</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="documents">
+        <div className="space-y-4">
+          <Card className="border-border bg-card shadow-sm">
+            <CardContent className="space-y-4 p-5">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <SectionHeader
+                  description="Upload private files or link externally managed documents. Files remain private and scan status is always visible."
+                  title="Document Library"
+                />
+                <div className="rounded-lg border border-[color:var(--warning)]/20 bg-[var(--warning-muted)] px-3 py-2 text-sm text-[var(--warning)]" role="note">
+                  Malware scanning is not configured. New files are not marked clean automatically.
+                </div>
+              </div>
+              {permissions.canUploadDocuments ? <DocumentUploadPanel evidence={evidence} matterId={matterId} /> : null}
+              <ExternalDocumentForm matterId={matterId} />
+            </CardContent>
+          </Card>
+
+          {documents.length === 0 ? (
+            <EmptyState description="Upload or link the first document for this matter." title="No documents have been added" />
+          ) : (
+            <>
+              <div className="hidden lg:block">
+                <DataTableShell columns={documentColumns}>
+                  {documents.map((document) => (
+                    <TableRow className="h-14" key={document.id}>
+                      <TableCell className="min-w-0 px-3 py-2">
+                        <p className="truncate font-medium text-foreground" title={document.title}>{document.title}</p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground" title={document.displayFilename}>{document.displayFilename}</p>
+                      </TableCell>
+                      <TableCell className="px-3 py-2 text-muted-foreground">{documentTypeLabels[document.documentType]}</TableCell>
+                      <TableCell className="px-3 py-2">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</TableCell>
+                      <TableCell className="px-3 py-2 text-muted-foreground">v{document.versionNumber}</TableCell>
+                      <TableCell className="px-3 py-2 text-muted-foreground">{sourceTypeLabels[document.sourceType]}</TableCell>
+                      <TableCell className="px-3 py-2"><ScanStatusBadge status={document.scanStatus} /></TableCell>
+                      <TableCell className="px-3 py-2"><VisibilityBadge visibility={document.visibility} /></TableCell>
+                      <TableCell className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          <Button asChild disabled={!canPreviewDocument(document)} size="sm" variant="outline">
+                            <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">Preview</a>
+                          </Button>
+                          <Button asChild disabled={document.status === "quarantined" || document.scanStatus === "flagged"} size="sm" variant="outline">
+                            <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">
+                              {document.externalUrl ? <ExternalLink aria-hidden="true" className="size-4" /> : null}
+                              {document.externalUrl ? "Open" : "Download"}
+                            </a>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </DataTableShell>
+              </div>
+              <div className="grid gap-3 lg:hidden">
+                {documents.map((document) => <DocumentCard document={document} key={document.id} />)}
+              </div>
+            </>
+          )}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="packages">
+        <div className="space-y-4">
+          <Card className="border-border bg-card shadow-sm">
+            <CardContent className="space-y-4 p-5">
+              <SectionHeader
+                description="Create and validate outgoing packages for later review and delivery. This phase never sends email."
+                title="Outbound Packages"
+              />
+              {permissions.canBuildPackages ? <CreatePackageForm matterAmountSought={matterAmountSought} matterId={matterId} templates={templates} /> : null}
+            </CardContent>
+          </Card>
+          {packages.length === 0 ? (
+            <EmptyState description="Create a package when the matter is ready for a demand, request, or notice." title="No outbound packages have been created" />
+          ) : (
+            <>
+              <div className="hidden lg:block">
+                <DataTableShell columns={packageColumns}>
+                  {packages.map((outboundPackage) => (
+                    <PackageRow outboundPackage={outboundPackage} key={outboundPackage.id} />
+                  ))}
+                </DataTableShell>
+              </div>
+              <div className="grid gap-3 lg:hidden">
+                {packages.map((outboundPackage) => <PackageCard outboundPackage={outboundPackage} key={outboundPackage.id} />)}
+              </div>
+            </>
+          )}
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function ExternalDocumentForm({ matterId }: { matterId: string }) {
+  return (
+    <details className="rounded-lg border border-border bg-background p-4">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">Link externally managed document</summary>
+      <form action={submitCreateExternalDocumentLinkAction} className="mt-4 grid gap-3 lg:grid-cols-2">
+        <input name="matterId" type="hidden" value={matterId} />
+        <label className="space-y-1 text-sm font-medium text-foreground">
+          <span>Title</span>
+          <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="title" required />
+        </label>
+        <label className="space-y-1 text-sm font-medium text-foreground">
+          <span>Document type</span>
+          <select className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="documentType" defaultValue="other">
+            {Object.entries(documentTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-medium text-foreground">
+          <span>External URL</span>
+          <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="externalUrl" placeholder="https://documents.example.com/..." required type="url" />
+        </label>
+        <label className="space-y-1 text-sm font-medium text-foreground">
+          <span>Source system</span>
+          <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="sourceSystem" defaultValue="Approved DMS" required />
+        </label>
+        <input name="visibility" type="hidden" value="package_eligible" />
+        <input name="documentDate" type="hidden" value="" />
+        <input name="description" type="hidden" value="Externally managed document link." />
+        <Button className="lg:col-span-2" type="submit" variant="outline">Create external link</Button>
+      </form>
+    </details>
+  );
+}
+
+function CreatePackageForm({ matterId, matterAmountSought, templates }: { matterId: string; matterAmountSought: number; templates: DocumentTemplate[] }) {
+  const hasApprovedTemplate = templates.some((template) => template.versions.some((version) => version.status === "approved"));
+  return (
+    <form action={submitCreatePackageAction} className="grid gap-3 rounded-lg border border-border bg-background p-4 lg:grid-cols-2">
+      <input name="matterId" type="hidden" value={matterId} />
+      <label className="space-y-1 text-sm font-medium text-foreground">
+        <span>Package type</span>
+        <select className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="packageType" defaultValue="initial_demand">
+          {Object.entries(packageTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-medium text-foreground">
+        <span>Package title</span>
+        <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="title" defaultValue="Initial demand package" required />
+      </label>
+      <label className="space-y-1 text-sm font-medium text-foreground">
+        <span>Amount demanded</span>
+        <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" inputMode="decimal" name="amountDemanded" defaultValue={String(matterAmountSought)} required />
+      </label>
+      <label className="space-y-1 text-sm font-medium text-foreground">
+        <span>Response deadline</span>
+        <input className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="responseDeadline" type="date" />
+      </label>
+      <label className="space-y-1 text-sm font-medium text-foreground lg:col-span-2">
+        <span>Payment instructions</span>
+        <textarea className="min-h-20 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" name="paymentInstructions" />
+      </label>
+      <input name="notes" type="hidden" value="Prepared in Phase 5A package builder." />
+      {!hasApprovedTemplate ? (
+        <p className="rounded-lg border border-[color:var(--warning)]/20 bg-[var(--warning-muted)] px-3 py-2 text-sm text-[var(--warning)] lg:col-span-2">
+          No approved template is available. An authorized user must approve a template before final approval.
+        </p>
+      ) : null}
+      <Button className="gap-2 lg:col-span-2" type="submit">
+        <PackagePlus aria-hidden="true" className="size-4" />
+        Create package
+      </Button>
+    </form>
+  );
+}
+
+function DocumentCard({ document }: { document: MatterDocument }) {
+  return (
+    <Card className="min-w-0 border-border bg-card shadow-sm">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-semibold text-foreground" title={document.title}>{document.title}</h3>
+            <p className="mt-1 truncate text-sm text-muted-foreground" title={document.displayFilename}>{document.displayFilename}</p>
+          </div>
+          <FileText aria-hidden="true" className="size-5 shrink-0 text-primary" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <DocumentStatusBadge status={document.status} />
+          <ScanStatusBadge status={document.scanStatus} />
+          <VisibilityBadge visibility={document.visibility} />
+        </div>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">Type</dt><dd className="font-medium text-foreground">{documentTypeLabels[document.documentType]}</dd></div>
+          <div><dt className="text-muted-foreground">Version</dt><dd className="font-medium text-foreground">v{document.versionNumber}</dd></div>
+          <div><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</dd></div>
+          <div><dt className="text-muted-foreground">Source</dt><dd className="font-medium text-foreground">{sourceTypeLabels[document.sourceType]}</dd></div>
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PackageRow({ outboundPackage }: { outboundPackage: OutboundPackage }) {
+  const primaryRecipient = outboundPackage.recipients[0];
+  return (
+    <TableRow className="h-14">
+      <TableCell className="px-3 py-2">
+        <p className="font-medium text-foreground">{outboundPackage.title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{outboundPackage.documents.length} attachment{outboundPackage.documents.length === 1 ? "" : "s"}</p>
+      </TableCell>
+      <TableCell className="px-3 py-2 text-muted-foreground">{packageTypeLabels[outboundPackage.packageType]}</TableCell>
+      <TableCell className="px-3 py-2">
+        <p className="font-medium text-foreground">{primaryRecipient?.recipientNameSnapshot ?? "No recipient"}</p>
+        {primaryRecipient ? <VerificationBadge status={primaryRecipient.verificationStatus} /> : null}
+      </TableCell>
+      <TableCell className="px-3 py-2"><PackageStatusBadge status={outboundPackage.status} /></TableCell>
+      <TableCell className="px-3 py-2 text-right font-medium">{outboundPackage.amountDemanded !== null ? <CurrencyDisplay value={outboundPackage.amountDemanded} /> : "Not set"}</TableCell>
+      <TableCell className="px-3 py-2">{outboundPackage.responseDeadline ? <DateDisplay value={outboundPackage.responseDeadline} /> : "Not set"}</TableCell>
+      <TableCell className="px-3 py-2 text-muted-foreground"><DateDisplay value={outboundPackage.updatedAt.slice(0, 10)} /></TableCell>
+    </TableRow>
+  );
+}
+
+function PackageCard({ outboundPackage }: { outboundPackage: OutboundPackage }) {
+  const primaryRecipient = outboundPackage.recipients[0];
+  return (
+    <Card className="min-w-0 border-border bg-card shadow-sm">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-semibold text-foreground" title={outboundPackage.title}>{outboundPackage.title}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{packageTypeLabels[outboundPackage.packageType]}</p>
+          </div>
+          <PackageStatusBadge status={outboundPackage.status} />
+        </div>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">Recipient</dt><dd className="font-medium text-foreground">{primaryRecipient?.recipientNameSnapshot ?? "No recipient"}</dd></div>
+          <div><dt className="text-muted-foreground">Email verification</dt><dd>{primaryRecipient ? <VerificationBadge status={primaryRecipient.verificationStatus} /> : "Not set"}</dd></div>
+          <div><dt className="text-muted-foreground">Amount</dt><dd className="font-medium text-foreground">{outboundPackage.amountDemanded !== null ? <CurrencyDisplay value={outboundPackage.amountDemanded} /> : "Not set"}</dd></div>
+          <div><dt className="text-muted-foreground">Response deadline</dt><dd className="font-medium text-foreground">{outboundPackage.responseDeadline ? <DateDisplay value={outboundPackage.responseDeadline} /> : "Not set"}</dd></div>
+        </dl>
+        <Button asChild size="sm" variant="outline">
+          <Link href="/packages">Open Packages workspace</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}

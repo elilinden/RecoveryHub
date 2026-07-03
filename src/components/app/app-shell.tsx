@@ -1,7 +1,8 @@
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
-import { MobileNavigation } from "@/components/app/mobile-navigation";
-import { Sidebar } from "@/components/app/sidebar";
+import { AppShellBody } from "@/components/app/app-shell-body";
+import { SIDEBAR_COLLAPSE_COOKIE } from "@/lib/app-shell/sidebar-cookie";
 import type { Profile } from "@/lib/data/profiles";
 
 type AppShellProps = {
@@ -10,7 +11,10 @@ type AppShellProps = {
   configurationNotice?: ReactNode;
 };
 
-export function AppShell({ children, profile, configurationNotice }: AppShellProps) {
+export async function AppShell({ children, profile, configurationNotice }: AppShellProps) {
+  const cookieStore = await cookies();
+  const defaultCollapsed = cookieStore.get(SIDEBAR_COLLAPSE_COOKIE)?.value === "1";
+
   return (
     <div className="min-h-screen overflow-x-clip bg-background">
       <a
@@ -19,14 +23,9 @@ export function AppShell({ children, profile, configurationNotice }: AppShellPro
       >
         Skip to content
       </a>
-      <Sidebar profile={profile} />
-      <div className="min-w-0 lg:pl-72">
-        <MobileNavigation profile={profile} />
-        <main className="mx-auto min-w-0 w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8" id="main-content">
-          {configurationNotice}
-          <div className="min-w-0">{children}</div>
-        </main>
-      </div>
+      <AppShellBody configurationNotice={configurationNotice} defaultCollapsed={defaultCollapsed} profile={profile}>
+        {children}
+      </AppShellBody>
     </div>
   );
 }

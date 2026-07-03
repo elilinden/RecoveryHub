@@ -28,7 +28,7 @@ const toneClasses: Record<Tone, string> = {
   success: "border-[color:var(--success)]/20 bg-[var(--success-muted)] text-[var(--success)]",
   warning: "border-[color:var(--warning)]/20 bg-[var(--warning-muted)] text-[var(--warning)]",
   urgent: "border-[color:var(--urgent)]/20 bg-[var(--urgent-muted)] text-[var(--urgent)]",
-  info: "border-primary/15 bg-[var(--info-muted)] text-primary",
+  info: "border-[color:var(--info)]/15 bg-[var(--info-muted)] text-[var(--info)]",
 };
 
 const statusConfig: Record<MatterStatus, { tone: Tone; icon: ComponentType<{ className?: string }> }> = {

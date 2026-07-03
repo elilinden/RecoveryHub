@@ -49,12 +49,14 @@ export type DashboardData = {
   mode: DashboardMode;
   canUseFirmMode: boolean;
   greetingName: string;
+  today: string;
   summaryMetrics: SummaryMetric[];
   priorityQueue: DashboardMatter[];
   needsFollowUp: DashboardMatter[];
   missingInformation: DashboardMatter[];
   upcomingDeadlines: DashboardDeadline[];
   readyForDemand: DashboardMatter[];
+  newReferrals: DashboardMatter[];
   myTasks: DashboardTask[];
   recentActivity: DashboardActivity[];
   workload: WorkloadItem[];
@@ -151,12 +153,14 @@ export async function loadDashboardData(input: {
     .filter((matter) => matter.snapshot.intakeStatus === "complete" && matter.snapshot.stage !== "new_referral" && matter.snapshot.stage !== "closed" && matter.snapshot.amountSought >= 10000)
     .sort((a, b) => b.snapshot.amountSought - a.snapshot.amountSought)
     .slice(0, 5);
+  const newReferrals = byFlagCategories(matters, ["referral"]).slice(0, 5);
   const lastFlagRefreshAt = [...storedFlags.values()].flat().map((flag) => flag.lastEvaluatedAt).sort().at(-1) ?? null;
 
   return {
     mode,
     canUseFirmMode,
     greetingName: input.profile.full_name.split(" ")[0] ?? "there",
+    today: now.toISOString(),
     summaryMetrics: buildSummaryMetrics({
       needsFollowUp,
       missingInformation,
@@ -170,6 +174,7 @@ export async function loadDashboardData(input: {
     missingInformation: missingInformation.slice(0, 5),
     upcomingDeadlines,
     readyForDemand,
+    newReferrals,
     myTasks,
     recentActivity,
     workload,

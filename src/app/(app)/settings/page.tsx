@@ -1,12 +1,14 @@
-import { Bell, Building2, GitBranch, LockKeyhole, Scale, UserRound } from "lucide-react";
+import { Bell, Building2, FileText, GitBranch, LockKeyhole, Scale, UserRound } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
 import { SectionHeader } from "@/components/common/section-header";
 import { ProfileSettingsForm } from "@/components/settings/profile-settings-form";
 import { RecoveryAssessmentSettings } from "@/components/settings/recovery-assessment-settings";
+import { DocumentTemplateSettings } from "@/components/settings/document-template-settings";
 import { TriageSettingsForm } from "@/components/settings/triage-settings-form";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireActiveProfile } from "@/lib/auth/session";
+import { loadDocumentTemplates } from "@/lib/documents-packages/data";
 import { loadTriageSettings } from "@/lib/triage/data";
 
 const settingsSections = [
@@ -22,13 +24,18 @@ const settingsSections = [
   },
   {
     title: "Workflow & Triage",
-    description: "Operational thresholds that drive rule-based attention flags.",
+    description: "Set the timing rules that decide when a matter gets flagged for attention.",
     icon: GitBranch,
   },
   {
     title: "Recovery Assessment",
     description: "Versioned scoring models and recommendation bands.",
     icon: Scale,
+  },
+  {
+    title: "Document Templates",
+    description: "Versioned non-AI package templates and approval controls.",
+    icon: FileText,
   },
   {
     title: "Notifications",
@@ -44,7 +51,10 @@ const settingsSections = [
 
 export default async function SettingsPage() {
   const { profile } = await requireActiveProfile();
-  const triageSettings = await loadTriageSettings(profile);
+  const [triageSettings, documentTemplates] = await Promise.all([
+    loadTriageSettings(profile),
+    loadDocumentTemplates(profile),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -68,6 +78,8 @@ export default async function SettingsPage() {
                       <TriageSettingsForm result={triageSettings} />
                     ) : section.title === "Recovery Assessment" ? (
                       <RecoveryAssessmentSettings profile={profile} />
+                    ) : section.title === "Document Templates" ? (
+                      <DocumentTemplateSettings profile={profile} templates={documentTemplates} />
                     ) : (
                       <div className="mt-5 rounded-lg border border-dashed border-border bg-background px-4 py-5 text-sm text-muted-foreground">
                         Configuration controls will be added in a later phase.

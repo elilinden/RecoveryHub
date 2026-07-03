@@ -3,40 +3,23 @@ import type { ReactNode } from "react";
 import { PlusCircle, RotateCw } from "lucide-react";
 
 import { CurrencyDisplay } from "@/components/common/currency-display";
-import { DataTableShell } from "@/components/common/data-table-shell";
 import { DateDisplay } from "@/components/common/date-display";
-import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/common/page-header";
-import { SectionHeader } from "@/components/common/section-header";
 import { StatusBadge } from "@/components/common/status-badge";
-import { SummaryMetricCard } from "@/components/common/summary-metric-card";
 import { TriageSeverityBadge } from "@/components/triage/triage-severity-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireActiveProfile } from "@/lib/auth/session";
 import { loadDashboardData, type DashboardMatter } from "@/lib/dashboard/data";
 import { taskStatusLabels } from "@/lib/matters-workspace/labels";
 import { submitRefreshDashboardTriageAction } from "@/lib/triage/actions";
+import { cn } from "@/lib/utils";
 import type { MatterStatus } from "@/lib/types";
 
 type DashboardPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
-
-const queueColumns = [
-  { key: "matter", header: "Matter" },
-  { key: "carrier", header: "Carrier" },
-  { key: "adjuster", header: "Adjuster" },
-  { key: "amount", header: "Amount sought" },
-  { key: "issue", header: "Primary issue" },
-  { key: "action", header: "Next action" },
-  { key: "responsible", header: "Responsible user" },
-  { key: "due", header: "Due date" },
-  { key: "statute", header: "Statute deadline" },
-  { key: "activity", header: "Activity age" },
-  { key: "severity", header: "Severity" },
-];
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = (await searchParams) ?? {};
@@ -44,8 +27,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const mode = readParam(params.mode);
   const dashboard = await loadDashboardData({ profile: session.profile, mode });
 
+  const urgentMatters = dedupeMatters([...dashboard.priorityQueue, ...dashboard.needsFollowUp, ...dashboard.missingInformation]);
+  const greeting = greetingFromDate(dashboard.today);
+  const dateLabel = new Date(dashboard.today).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
         actions={
           <>
@@ -63,7 +50,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               <input name="mode" type="hidden" value={dashboard.mode} />
               <Button className="h-10 gap-2" type="submit" variant="outline">
                 <RotateCw aria-hidden="true" className="size-4" />
-                Refresh Triage
+                Refresh
               </Button>
             </form>
             <Button asChild className="h-10 gap-2">
@@ -74,243 +61,327 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </Button>
           </>
         }
-        subtitle="Here is what needs attention today."
-        title={`Good morning, ${dashboard.greetingName}`}
+        subtitle={`${dateLabel} · ${dashboard.lastFlagRefreshAt ? `Last checked ${new Date(dashboard.lastFlagRefreshAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : "Refresh to check for newly overdue work"}`}
+        title={`${greeting}, ${dashboard.greetingName}`}
       />
 
-      <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
-        <span className="font-medium text-foreground">{dashboard.mode === "firm" ? "Firm Overview" : "My Work"}</span>
-        {" "}is showing {dashboard.totalMatterCount} permitted matter{dashboard.totalMatterCount === 1 ? "" : "s"}.
-        {" "}Rules are transparent operational flags, not a Recovery Score or legal advice.
-        {dashboard.lastFlagRefreshAt ? ` Last persisted refresh: ${new Date(dashboard.lastFlagRefreshAt).toLocaleString()}.` : " Persisted flags will appear after triage refresh."}
-      </div>
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Matter summary">
-        {dashboard.summaryMetrics.map((metric) => (
-          <SummaryMetricCard key={metric.title} metric={metric} />
-        ))}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Today at a glance">
+        <TodayMetric count={urgentMatters.length} href="/matters?view=needs-follow-up" label="Urgent matters" tone="urgent" />
+        <TodayMetric count={dashboard.myTasks.length} href="/matters?view=my-tasks" label="Tasks due" tone="neutral" />
+        <TodayMetric count={dashboard.upcomingDeadlines.length} href="/matters?view=upcoming-deadlines" label="Deadlines approaching" tone="warning" />
+        <TodayMetric count={dashboard.readyForDemand.length} href="/matters?view=ready-for-demand" label="Ready for demand" tone="success" />
       </section>
 
-      <section className="space-y-4">
-        <SectionHeader
-          description="Ranked deterministically by legal deadlines, overdue actions, missing information, stale activity, and readiness flags."
-          title="Priority Work Queue"
-        />
-        {dashboard.priorityQueue.length > 0 ? (
-          <>
-            <div className="hidden 2xl:block">
-              <DataTableShell columns={queueColumns}>
-                {dashboard.priorityQueue.map((matter) => (
-                  <TableRow className="h-16" key={matter.snapshot.id}>
-                    <TableCell>
-                      <MatterLink matter={matter} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{matter.snapshot.carrierName}</TableCell>
-                    <TableCell className="text-muted-foreground">{matter.snapshot.assignedAdjusterName ?? "Not assigned"}</TableCell>
-                    <TableCell className="font-medium"><CurrencyDisplay value={matter.snapshot.amountSought} /></TableCell>
-                    <TableCell className="max-w-64">
-                      <p className="font-medium text-foreground">{matter.primaryFlag?.title ?? "No current issue"}</p>
-                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{matter.primaryFlag?.explanation}</p>
-                    </TableCell>
-                    <TableCell className="max-w-52 text-muted-foreground">{matter.snapshot.nextAction ?? "Not assigned"}</TableCell>
-                    <TableCell className="text-muted-foreground">{matter.snapshot.assignedFirmUser}</TableCell>
-                    <TableCell>{matter.snapshot.nextActionDueDate ? <DateDisplay value={matter.snapshot.nextActionDueDate} /> : "Not set"}</TableCell>
-                    <TableCell>{matter.snapshot.statuteDeadline ? <DateDisplay value={matter.snapshot.statuteDeadline} /> : "Not entered"}</TableCell>
-                    <TableCell className="text-muted-foreground">{matter.snapshot.daysSinceLastSubstantiveActivity === null ? "No activity" : `${matter.snapshot.daysSinceLastSubstantiveActivity} days`}</TableCell>
-                    <TableCell>{matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}</TableCell>
-                  </TableRow>
-                ))}
-              </DataTableShell>
+      <Card className="border-border bg-card shadow-sm">
+        <CardContent className="p-5">
+          <Tabs defaultValue="urgent">
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">Action Center</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Everything that needs a decision today, in one place.</p>
             </div>
-            <div className="grid gap-3 2xl:hidden">
-              {dashboard.priorityQueue.map((matter) => <DashboardMatterCard key={matter.snapshot.id} matter={matter} />)}
-            </div>
-          </>
-        ) : (
-          <EmptyState
-            description="There are no overdue actions, urgent deadlines, or high-priority triage flags in this view."
-            title="Nothing urgent requires attention"
-          />
-        )}
+            <TabsList className="mt-4 h-auto w-full flex-wrap justify-start gap-1 bg-secondary p-1">
+              <TabsTrigger className="gap-1.5" value="urgent">
+                Urgent <TabCount value={urgentMatters.length} />
+              </TabsTrigger>
+              <TabsTrigger className="gap-1.5" value="tasks">
+                My Tasks <TabCount value={dashboard.myTasks.length} />
+              </TabsTrigger>
+              <TabsTrigger className="gap-1.5" value="deadlines">
+                Deadlines <TabCount value={dashboard.upcomingDeadlines.length} />
+              </TabsTrigger>
+              <TabsTrigger className="gap-1.5" value="followup">
+                Follow-Up <TabCount value={dashboard.needsFollowUp.length} />
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent className="mt-4 space-y-3" value="urgent">
+              {urgentMatters.length > 0 ? (
+                urgentMatters.map((matter) => <UrgentMatterRow key={matter.snapshot.id} matter={matter} />)
+              ) : (
+                <InlineEmpty description="No overdue actions, urgent deadlines, or missing information right now." title="Nothing urgent" />
+              )}
+            </TabsContent>
+
+            <TabsContent className="mt-4 space-y-2" value="tasks">
+              {dashboard.myTasks.length > 0 ? (
+                dashboard.myTasks.map((task) => (
+                  <CompactRow
+                    href={`/matters/${task.matterId}#tasks`}
+                    key={task.id}
+                    meta={`${task.carrierName} · ${task.dueDate ? `Due ${task.dueDate}` : "No due date"}`}
+                    right={<StatusBadge status={taskStatusLabels[task.status] as MatterStatus} />}
+                    title={`${task.title} · ${task.matterName}`}
+                  />
+                ))
+              ) : (
+                <InlineEmpty description="You have no overdue tasks or tasks due soon." title="You are caught up" />
+              )}
+            </TabsContent>
+
+            <TabsContent className="mt-4 space-y-2" value="deadlines">
+              {dashboard.upcomingDeadlines.length > 0 ? (
+                dashboard.upcomingDeadlines.map((deadline) => (
+                  <CompactRow
+                    href={`/matters/${deadline.matterId}#deadlines`}
+                    key={deadline.id}
+                    meta={`${deadline.deadlineType.replaceAll("_", " ")} · ${deadline.daysRemaining < 0 ? `${Math.abs(deadline.daysRemaining)} days overdue` : `${deadline.daysRemaining} days remaining`} · ${deadline.isVerified ? "Verified" : "Needs verification"}`}
+                    right={<DateDisplay value={deadline.deadlineDate} />}
+                    title={`${deadline.title} · ${deadline.matterName}`}
+                  />
+                ))
+              ) : (
+                <InlineEmpty description="No recorded deadlines fall within the tracked window." title="No deadlines approaching" />
+              )}
+              {dashboard.upcomingDeadlines.length > 0 ? (
+                <Button asChild className="mt-1" variant="link">
+                  <Link href="/matters?view=upcoming-deadlines">View all deadlines</Link>
+                </Button>
+              ) : null}
+            </TabsContent>
+
+            <TabsContent className="mt-4 space-y-2" value="followup">
+              {dashboard.needsFollowUp.length > 0 ? (
+                dashboard.needsFollowUp.map((matter) => (
+                  <CompactRow
+                    href={`/matters/${matter.snapshot.id}#attention`}
+                    key={matter.snapshot.id}
+                    meta={`${matter.primaryFlag?.suggestedAction ?? "Review the next step"} · ${matter.snapshot.assignedFirmUser}`}
+                    right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
+                    title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
+                  />
+                ))
+              ) : (
+                <InlineEmpty description="No matters are waiting on a response or stuck without a next action." title="Nothing waiting on follow-up" />
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Insights</h2>
+          <p className="text-sm text-muted-foreground">Lower-priority information you can check when you have time.</p>
+        </div>
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <Tabs defaultValue="ready">
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-secondary p-1">
+                <TabsTrigger value="ready">Ready for Demand <TabCount value={dashboard.readyForDemand.length} /></TabsTrigger>
+                <TabsTrigger value="opportunities">High-Value Opportunities <TabCount value={dashboard.highValueOpportunities.length} /></TabsTrigger>
+                <TabsTrigger value="assessment">Assessment Needed <TabCount value={dashboard.assessmentNeeded.length} /></TabsTrigger>
+                <TabsTrigger value="referrals">New Referrals <TabCount value={dashboard.newReferrals.length} /></TabsTrigger>
+                <TabsTrigger value="activity">Recent Activity</TabsTrigger>
+                {dashboard.workload.length > 0 ? <TabsTrigger value="workload">Workload</TabsTrigger> : null}
+              </TabsList>
+
+              <TabsContent className="mt-4 space-y-2" value="ready">
+                {dashboard.readyForDemand.length > 0 ? (
+                  dashboard.readyForDemand.map((matter) => (
+                    <CompactRow
+                      href={`/matters/${matter.snapshot.id}#attention`}
+                      key={matter.snapshot.id}
+                      meta={`${matter.snapshot.carrierName} · ${matter.snapshot.liabilityAssessment} liability · ${matter.snapshot.insuranceStatus.replaceAll("_", " ")}`}
+                      right={<CurrencyDisplay value={matter.snapshot.amountSought} />}
+                      title={`${matter.snapshot.matterName} · Ready for attorney confirmation`}
+                    />
+                  ))
+                ) : (
+                  <InlineEmpty
+                    description="A matter will appear here once its liability, amount, recipient, and supporting evidence are complete."
+                    title="No matters are ready for demand yet"
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent className="mt-4 space-y-2" value="opportunities">
+                {dashboard.highValueOpportunities.length > 0 ? (
+                  dashboard.highValueOpportunities.map((summary) => (
+                    <CompactRow
+                      href={`/matters/${summary.matterId}/assessment`}
+                      key={summary.matterId}
+                      meta={`${summary.current?.viabilityScore ?? 0}/100 viability · ${summary.current?.dataCompletenessPercentage ?? 0}% complete · ${summary.assignedAttorneyName ?? "Unassigned"}`}
+                      right={<CurrencyDisplay value={summary.current?.expectedNetValue ?? 0} />}
+                      title={`${summary.matterName} · High expected value`}
+                    />
+                  ))
+                ) : (
+                  <InlineEmpty
+                    description="Matters appear here once a finished assessment shows strong expected value."
+                    title="No standout opportunities yet"
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent className="mt-4 space-y-2" value="assessment">
+                {dashboard.assessmentNeeded.length > 0 ? (
+                  dashboard.assessmentNeeded.map((matter) => (
+                    <CompactRow
+                      href={`/matters/${matter.snapshot.id}/assessment`}
+                      key={matter.snapshot.id}
+                      meta={`${matter.snapshot.carrierName} · ${matter.snapshot.assignedFirmUser}`}
+                      right={<span className="font-medium text-primary">Start assessment</span>}
+                      title={`${matter.snapshot.matterName} · ${matter.snapshot.amountSought.toLocaleString()}`}
+                    />
+                  ))
+                ) : (
+                  <InlineEmpty description="Matters that pass initial review will appear here for assessment." title="No assessments are needed right now" />
+                )}
+              </TabsContent>
+
+              <TabsContent className="mt-4 space-y-2" value="referrals">
+                {dashboard.newReferrals.length > 0 ? (
+                  dashboard.newReferrals.map((matter) => (
+                    <CompactRow
+                      href={`/matters/${matter.snapshot.id}`}
+                      key={matter.snapshot.id}
+                      meta={`${matter.snapshot.carrierName} · ${matter.snapshot.assignedFirmUser}`}
+                      right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
+                      title={matter.snapshot.matterName}
+                    />
+                  ))
+                ) : (
+                  <InlineEmpty description="New and recently reviewed referrals will appear here." title="No referrals need review" />
+                )}
+              </TabsContent>
+
+              <TabsContent className="mt-4 space-y-2" value="activity">
+                {dashboard.recentActivity.length > 0 ? (
+                  dashboard.recentActivity.map((activity) => (
+                    <CompactRow
+                      href={`/matters/${activity.matterId}#activity`}
+                      key={`${activity.id}-${activity.matterId}`}
+                      meta={`${activity.actorName ?? "Recovery Hub"} · ${new Date(activity.occurredAt).toLocaleString()}`}
+                      title={`${activity.label} · ${activity.matterName}`}
+                    />
+                  ))
+                ) : (
+                  <InlineEmpty description="New matter events will appear here after they are recorded." title="No recent activity" />
+                )}
+              </TabsContent>
+
+              {dashboard.workload.length > 0 ? (
+                <TabsContent className="mt-4" value="workload">
+                  <p className="mb-3 text-sm text-muted-foreground">How active work is distributed across the firm. This is not a productivity ranking.</p>
+                  <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                    {dashboard.workload.map((item) => (
+                      <div className="rounded-lg bg-secondary/60 p-4" key={item.userName}>
+                        <h3 className="font-semibold text-foreground">{item.userName}</h3>
+                        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                          <Metric label="Active matters" value={item.activeMatters} />
+                          <Metric label="Overdue actions" value={item.overdueNextActions} />
+                          <Metric label="Upcoming deadlines" value={item.upcomingDeadlines} />
+                          <Metric label="Open tasks" value={item.openTasks} />
+                          <Metric label="Ready for demand" value={item.readyForDemand} />
+                          <Metric label="Stale matters" value={item.staleMatters} />
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+              ) : null}
+            </Tabs>
+          </CardContent>
+        </Card>
       </section>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <DashboardSection title="My Tasks" description="Overdue tasks and tasks due within seven days.">
-          {dashboard.myTasks.length > 0 ? dashboard.myTasks.map((task) => (
-            <CompactRow
-              href={`/matters/${task.matterId}#tasks`}
-              key={task.id}
-              meta={`${task.carrierName} · ${task.dueDate ? `Due ${task.dueDate}` : "No due date"}`}
-              right={<StatusBadge status={taskStatusLabels[task.status] as MatterStatus} />}
-              title={`${task.title} · ${task.matterName}`}
-            />
-          )) : <InlineEmpty title="You are caught up" description="You have no overdue tasks or tasks due soon." />}
-        </DashboardSection>
-
-        <DashboardSection title="Upcoming Deadlines" description="Overdue, urgent, upcoming, and unverified recorded deadlines.">
-          {dashboard.upcomingDeadlines.length > 0 ? dashboard.upcomingDeadlines.map((deadline) => (
-            <CompactRow
-              href={`/matters/${deadline.matterId}#deadlines`}
-              key={deadline.id}
-              meta={`${deadline.deadlineType.replaceAll("_", " ")} · ${deadline.daysRemaining < 0 ? `${Math.abs(deadline.daysRemaining)} days overdue` : `${deadline.daysRemaining} days remaining`} · ${deadline.isVerified ? "Verified" : "Unverified"}`}
-              right={<DateDisplay value={deadline.deadlineDate} />}
-              title={`${deadline.title} · ${deadline.matterName}`}
-            />
-          )) : <InlineEmpty title="No deadlines are approaching" description="No recorded deadlines fall within the selected period." />}
-          <Button asChild className="mt-2" variant="link">
-            <Link href="/matters?view=upcoming-deadlines">View all deadlines</Link>
-          </Button>
-        </DashboardSection>
-
-        <DashboardSection title="Ready for Demand" description="Transparent suggestions that still require attorney confirmation.">
-          {dashboard.readyForDemand.length > 0 ? dashboard.readyForDemand.map((matter) => (
-            <CompactRow
-              href={`/matters/${matter.snapshot.id}#attention`}
-              key={matter.snapshot.id}
-              meta={`${matter.snapshot.carrierName} · ${matter.snapshot.liabilityAssessment} liability · ${matter.snapshot.insuranceStatus.replaceAll("_", " ")}`}
-              right={<CurrencyDisplay value={matter.snapshot.amountSought} />}
-              title={`${matter.snapshot.matterName} · Appears ready for attorney confirmation`}
-            />
-          )) : <InlineEmpty title="No matters currently meet the demand-readiness rules" description="Matters will appear after their required information and supporting evidence are recorded." />}
-        </DashboardSection>
-
-        <DashboardSection title="Needs Follow-Up" description="Waiting, stale, missing-next-action, or overdue-review matters.">
-          {dashboard.needsFollowUp.length > 0 ? dashboard.needsFollowUp.map((matter) => (
-            <CompactRow
-              href={`/matters/${matter.snapshot.id}#attention`}
-              key={matter.snapshot.id}
-              meta={`${matter.primaryFlag?.suggestedAction ?? "Review the next step"} · ${matter.snapshot.assignedFirmUser}`}
-              right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
-              title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
-            />
-          )) : <InlineEmpty title="Nothing urgent requires attention" description="There are no overdue actions or urgent follow-ups in your current view." />}
-        </DashboardSection>
-
-        <DashboardSection title="Missing Information" description="Material gaps that could block recovery work.">
-          {dashboard.missingInformation.length > 0 ? dashboard.missingInformation.map((matter) => (
-            <CompactRow
-              href={`/matters/${matter.snapshot.id}#attention`}
-              key={matter.snapshot.id}
-              meta={matter.primaryFlag?.explanation ?? "Review missing information."}
-              right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
-              title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Information gap"}`}
-            />
-          )) : <InlineEmpty title="No material information gaps" description="The matters in this view have the core information being tracked." />}
-        </DashboardSection>
-
-        <DashboardSection title="Recent Activity" description="Meaningful matter events, excluding autosaves and UI activity.">
-          {dashboard.recentActivity.length > 0 ? dashboard.recentActivity.map((activity) => (
-            <CompactRow
-              href={`/matters/${activity.matterId}#activity`}
-              key={`${activity.id}-${activity.matterId}`}
-              meta={`${activity.actorName ?? "Recovery Hub"} · ${new Date(activity.occurredAt).toLocaleString()}`}
-              title={`${activity.label} · ${activity.matterName}`}
-            />
-          )) : <InlineEmpty title="No recent substantive activity" description="New matter events will appear here after they are recorded." />}
-        </DashboardSection>
-
-        <DashboardSection title="High-Value Opportunities" description="Assessment-based opportunities with positive expected net value and adequate completeness.">
-          {dashboard.highValueOpportunities.length > 0 ? dashboard.highValueOpportunities.map((summary) => (
-            <CompactRow
-              href={`/matters/${summary.matterId}/assessment`}
-              key={summary.matterId}
-              meta={`${summary.current?.viabilityScore ?? 0}/100 viability · ${summary.current?.dataCompletenessPercentage ?? 0}% complete · ${summary.assignedAttorneyName ?? "Unassigned"}`}
-              right={<CurrencyDisplay value={summary.current?.expectedNetValue ?? 0} />}
-              title={`${summary.matterName} · Assessment-based opportunity`}
-            />
-          )) : <InlineEmpty title="No matters currently meet the assessment criteria" description="Opportunities will appear after sufficiently complete assessments are finalized." />}
-        </DashboardSection>
-
-        <DashboardSection title="Assessment Needed" description="Active reviewed matters above the assessment threshold with no finalized assessment.">
-          {dashboard.assessmentNeeded.length > 0 ? dashboard.assessmentNeeded.map((matter) => (
-            <CompactRow
-              href={`/matters/${matter.snapshot.id}/assessment`}
-              key={matter.snapshot.id}
-              meta={`${matter.snapshot.carrierName} · ${matter.snapshot.assignedFirmUser} · amount sought ${matter.snapshot.amountSought.toLocaleString()}`}
-              right={<span className="font-medium text-primary">Start</span>}
-              title={`${matter.snapshot.matterName} · No finalized assessment`}
-            />
-          )) : <InlineEmpty title="No recovery assessments are currently needed" description="Matters that meet the threshold will appear here after initial review." />}
-        </DashboardSection>
-      </div>
-
-      {dashboard.workload.length > 0 ? (
-        <section className="space-y-4">
-          <SectionHeader
-            description="Firm-wide workload balancing for permitted users. This is not a productivity ranking."
-            title="Workload Overview"
-          />
-          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-            {dashboard.workload.map((item) => (
-              <Card className="border-border bg-card shadow-sm" key={item.userName}>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold text-foreground">{item.userName}</h3>
-                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <Metric label="Active matters" value={item.activeMatters} />
-                    <Metric label="Overdue actions" value={item.overdueNextActions} />
-                    <Metric label="Upcoming deadlines" value={item.upcomingDeadlines} />
-                    <Metric label="Open tasks" value={item.openTasks} />
-                    <Metric label="Ready for demand" value={item.readyForDemand} />
-                    <Metric label="Stale matters" value={item.staleMatters} />
-                  </dl>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
 
-function DashboardMatterCard({ matter }: { matter: DashboardMatter }) {
+function dedupeMatters(matters: DashboardMatter[]): DashboardMatter[] {
+  const seen = new Map<string, DashboardMatter>();
+  for (const matter of matters) {
+    if (!seen.has(matter.snapshot.id)) seen.set(matter.snapshot.id, matter);
+  }
+  return [...seen.values()];
+}
+
+function greetingFromDate(iso: string) {
+  const hour = new Date(iso).getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+function TabCount({ value }: { value: number }) {
+  if (value === 0) return null;
+  return <span className="rounded-full bg-background px-1.5 py-0.5 text-xs font-semibold text-foreground group-data-active/tabs-list:bg-primary/10">{value}</span>;
+}
+
+const todayMetricTone: Record<"urgent" | "warning" | "success" | "neutral", string> = {
+  urgent: "text-[var(--urgent)]",
+  warning: "text-[var(--warning)]",
+  success: "text-[var(--success)]",
+  neutral: "text-primary",
+};
+
+function TodayMetric({ label, count, href, tone }: { label: string; count: number; href: string; tone: "urgent" | "warning" | "success" | "neutral" }) {
+  const isZero = count === 0;
+
   return (
-    <Card className="border-border bg-card shadow-sm">
-      <CardContent className="p-4">
-        <Link className="block focus-visible:rounded-md" href={`/matters/${matter.snapshot.id}#attention`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold text-foreground">{matter.snapshot.matterName}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{matter.snapshot.carrierName}</p>
-            </div>
-            {matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
-          </div>
-          <p className="mt-4 text-sm font-medium text-foreground">{matter.primaryFlag?.title ?? "No current issue"}</p>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">{matter.primaryFlag?.explanation}</p>
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <Info label="Adjuster" value={matter.snapshot.assignedAdjusterName ?? "Not assigned"} />
-            <Info label="Amount" value={<CurrencyDisplay value={matter.snapshot.amountSought} />} />
-            <Info label="Next action" value={matter.snapshot.nextAction ?? "Not assigned"} />
-            <Info label="Next-action due" value={matter.snapshot.nextActionDueDate ?? "Not set"} />
-            <Info label="Statute deadline" value={matter.snapshot.statuteDeadline ?? "Not entered"} />
-            <Info label="Activity age" value={matter.snapshot.daysSinceLastSubstantiveActivity === null ? "No activity" : `${matter.snapshot.daysSinceLastSubstantiveActivity} days`} />
-            <Info label="Firm user" value={matter.snapshot.assignedFirmUser} />
-          </div>
-        </Link>
-      </CardContent>
-    </Card>
+    <Link
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-lg border px-4 py-3 transition-colors",
+        isZero ? "border-border bg-secondary/50 hover:bg-secondary" : "border-border bg-card shadow-sm hover:border-primary/30"
+      )}
+      href={href}
+    >
+      <span className={cn("text-sm font-medium", isZero ? "text-muted-foreground" : "text-foreground")}>{label}</span>
+      <span className={cn("text-xl font-semibold", isZero ? "text-muted-foreground" : todayMetricTone[tone])}>{count}</span>
+    </Link>
   );
 }
 
-function MatterLink({ matter }: { matter: DashboardMatter }) {
+function UrgentMatterRow({ matter }: { matter: DashboardMatter }) {
+  const flag = matter.primaryFlag;
+  const otherFlags = matter.flags.filter((item) => item !== flag);
+
   return (
-    <>
-      <Link className="font-medium text-foreground hover:underline" href={`/matters/${matter.snapshot.id}`}>
-        {matter.snapshot.matterName}
-      </Link>
-      <p className="mt-1 text-xs text-muted-foreground">{matter.flags.length} active {matter.flags.length === 1 ? "flag" : "flags"}</p>
-    </>
+    <div className="rounded-lg border border-border bg-background p-4 transition-colors hover:border-primary/30">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link className="font-semibold text-foreground hover:underline" href={`/matters/${matter.snapshot.id}`}>
+              {matter.snapshot.matterName}
+            </Link>
+            {flag ? <TriageSeverityBadge severity={flag.severity} /> : null}
+          </div>
+          <p className="mt-1.5 text-sm font-medium text-foreground">{flag?.title ?? "No current issue"}</p>
+          {flag ? <p className="mt-0.5 text-sm leading-6 text-muted-foreground">{flag.explanation}</p> : null}
+          {otherFlags.length > 0 ? (
+            <details className="mt-2 group/details">
+              <summary className="cursor-pointer text-sm font-medium text-primary select-none">
+                +{otherFlags.length} other {otherFlags.length === 1 ? "issue" : "issues"} on this matter
+              </summary>
+              <ul className="mt-2 space-y-1 border-l-2 border-border pl-3 text-sm text-muted-foreground">
+                {otherFlags.map((item) => (
+                  <li key={item.ruleKey}>{item.title}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-sm sm:shrink-0 sm:grid-cols-1 sm:text-right">
+          <MiniField label="Responsible" value={matter.snapshot.assignedFirmUser} />
+          <MiniField label="Due" value={matter.snapshot.nextActionDueDate ? <DateDisplay value={matter.snapshot.nextActionDueDate} /> : "Not set"} />
+          <MiniField label="Amount" value={<CurrencyDisplay value={matter.snapshot.amountSought} />} />
+        </div>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/matters/${matter.snapshot.id}`}>Open Matter</Link>
+        </Button>
+      </div>
+    </div>
   );
 }
 
-function DashboardSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+function MiniField({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <section className="space-y-3">
-      <SectionHeader description={description} title={title} />
-      <Card className="border-border bg-card shadow-sm">
-        <CardContent className="space-y-3 p-4">{children}</CardContent>
-      </Card>
-    </section>
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-medium text-foreground">{value}</p>
+    </div>
   );
 }
 
@@ -335,20 +406,11 @@ function InlineEmpty({ title, description }: { title: string; description: strin
   );
 }
 
-function Info({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div>
-      <p className="text-muted-foreground">{label}</p>
-      <p className="mt-1 font-medium text-foreground">{value}</p>
-    </div>
-  );
-}
-
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-border bg-background p-3">
+    <div>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-lg font-semibold text-foreground">{value}</dd>
+      <dd className="font-semibold text-foreground">{value}</dd>
     </div>
   );
 }

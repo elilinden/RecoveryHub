@@ -7,8 +7,10 @@ import { DateDisplay } from "@/components/common/date-display";
 import { PageHeader } from "@/components/common/page-header";
 import { SectionHeader } from "@/components/common/section-header";
 import { StatusBadge } from "@/components/common/status-badge";
+import { StatusBadgeList } from "@/components/common/status-badge-list";
 import { MatterWarnings } from "@/components/matters/matter-workspace-card";
 import { DetailSummaryCard } from "@/components/matters/detail-summary-card";
+import { MatterDocumentsPackagesPanel } from "@/components/documents-packages/matter-documents-packages-panel";
 import { AssessmentSummaryCards } from "@/components/recovery-assessment/assessment-summary-cards";
 import { MatterTriagePanel } from "@/components/triage/matter-triage-panel";
 import { TriageSeverityBadge } from "@/components/triage/triage-severity-badge";
@@ -35,6 +37,8 @@ import { loadActiveMatterFlags, loadRecentResolvedMatterFlags, loadTriageSetting
 import { evaluateMatterTriage, getPrimaryTriageFlag, isSnoozed } from "@/lib/triage/rules";
 import { createSnapshotFromDetail } from "@/lib/triage/types";
 import { loadMatterAssessmentBundle } from "@/lib/recovery-assessment/data";
+import { loadMatterDocumentsAndPackages } from "@/lib/documents-packages/data";
+import { permissionsForRole } from "@/lib/documents-packages/types";
 import {
   submitAddMatterEventAction,
   submitArchiveMatterAction,
@@ -72,6 +76,8 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     .filter((flag) => !isSnoozed(flag));
   const resolvedTriageFlags = await loadRecentResolvedMatterFlags(matter.id);
   const assessmentBundle = await loadMatterAssessmentBundle(matter);
+  const documentPackageData = await loadMatterDocumentsAndPackages({ matterId: matter.id, profile: session.profile });
+  const documentPackagePermissions = permissionsForRole(session.profile.role);
   const primaryTriageFlag = getPrimaryTriageFlag(activeTriageFlags);
   const primaryWarning = matter.warnings[0];
   const remaining = Math.max(0, matter.amountSought - matter.amountRecovered);
@@ -106,14 +112,26 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         title={matter.matterName}
       />
 
-      <div className="flex flex-wrap gap-2">
-        <StatusBadge status={matterTypeLabels[matter.matterType] as MatterStatus} />
-        <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} />
-        <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} />
-        <StatusBadge status={priorityLabels[matter.priority] as MatterStatus} />
-        {matter.statuteDeadlineVerified ? <StatusBadge status="Deadline verified" /> : <StatusBadge status="Unverified statute deadline" />}
-        {primaryTriageFlag ? <TriageSeverityBadge severity={primaryTriageFlag.severity} /> : null}
-      </div>
+      <StatusBadgeList
+        items={[
+          ...(primaryTriageFlag
+            ? [{ key: "severity", node: <TriageSeverityBadge severity={primaryTriageFlag.severity} /> }]
+            : []),
+          { key: "stage", node: <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} /> },
+          { key: "priority", node: <StatusBadge status={priorityLabels[matter.priority] as MatterStatus} /> },
+          {
+            key: "deadline",
+            node: matter.statuteDeadlineVerified ? (
+              <StatusBadge status="Deadline verified" />
+            ) : (
+              <StatusBadge status="Unverified statute deadline" />
+            ),
+          },
+          { key: "type", node: <StatusBadge status={matterTypeLabels[matter.matterType] as MatterStatus} /> },
+          { key: "intake", node: <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} /> },
+        ]}
+        max={3}
+      />
 
       <Card className="border-border bg-card shadow-sm">
         <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -202,7 +220,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             <p className="mt-4 text-sm leading-6 text-muted-foreground">
               {matter.currentStatusSummary ?? "No status summary has been recorded yet."}
             </p>
-            <dl className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <dl className="mt-4 grid gap-x-6 divide-y divide-border rounded-lg bg-secondary/60 px-4 sm:grid-cols-2 sm:divide-y-0">
               <Info label="Stage" value={matterStageLabels[matter.stage]} />
               <Info label="Next action" value={matter.nextAction ?? "Not assigned"} />
               <Info label="Responsible person" value={matter.assignedFirmUser} />
@@ -238,6 +256,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
           <TabsTrigger value="deadlines">Deadlines</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="documents-packages">Documents & Packages</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -462,6 +481,18 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="documents-packages" id="documents-packages">
+          <MatterDocumentsPackagesPanel
+            documents={documentPackageData.documents}
+            evidence={matter.evidence}
+            matterAmountSought={matter.amountSought}
+            matterId={matter.id}
+            packages={documentPackageData.packages}
+            permissions={documentPackagePermissions}
+            templates={documentPackageData.templates}
+          />
+        </TabsContent>
       </Tabs>
 
       <Card className="border-border bg-card shadow-sm">
@@ -515,18 +546,18 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="space-y-3">
-      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
-      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    <section className="space-y-2">
+      <h3 className="text-[15px] font-semibold text-foreground">{title}</h3>
+      <dl className="divide-y divide-border rounded-lg bg-secondary/60 px-4">{children}</dl>
     </section>
   );
 }
 
 function Info({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-background p-4">
+    <div className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-sm font-medium text-foreground">{value}</dd>
+      <dd className="text-sm font-medium text-foreground sm:text-right">{value}</dd>
     </div>
   );
 }

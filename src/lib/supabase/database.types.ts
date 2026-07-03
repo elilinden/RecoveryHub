@@ -222,12 +222,23 @@ export type Database = {
       recovery_assessments: GenericTable;
       recovery_assessment_responses: GenericTable;
       recovery_assessment_overrides: GenericTable;
+      matter_documents: GenericTable;
+      evidence_document_links: GenericTable;
+      document_templates: GenericTable;
+      document_template_versions: GenericTable;
+      outbound_packages: GenericTable;
+      outbound_package_recipients: GenericTable;
+      outbound_package_documents: GenericTable;
+      outbound_package_validations: GenericTable;
+      outbound_package_reviews: GenericTable;
       external_references: GenericTable;
       client_updates: GenericTable;
     };
     Views: Record<string, never>;
     Functions: {
       can_access_matter: { Args: { matter_uuid: string }; Returns: boolean };
+      can_access_document: { Args: { document_uuid: string }; Returns: boolean };
+      can_access_package: { Args: { package_uuid: string }; Returns: boolean };
       is_admin: { Args: { user_uuid?: string }; Returns: boolean };
       is_partner_or_admin: { Args: { user_uuid?: string }; Returns: boolean };
     };

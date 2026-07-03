@@ -22,13 +22,13 @@ type MattersPageProps = {
 };
 
 const matterColumns = [
-  { key: "matter", header: "Matter", className: "sticky left-0 z-30 w-[17rem] min-w-[17rem] bg-secondary/95" },
-  { key: "carrier", header: "Carrier", className: "w-[11rem] min-w-[11rem]" },
-  { key: "amount", header: "Amount sought", className: "w-[9rem] min-w-[9rem] text-right" },
-  { key: "stage", header: "Current stage", className: "w-[11rem] min-w-[11rem]" },
-  { key: "nextAction", header: "Next action", className: "w-[18rem] min-w-[18rem]" },
-  { key: "nextDue", header: "Next-action due", className: "w-[10rem] min-w-[10rem]" },
-  { key: "warnings", header: "Primary status or warning", className: "w-[14rem] min-w-[14rem]" },
+  { key: "matter", header: "Matter", className: "sticky left-0 z-30 w-[12rem] min-w-[12rem] bg-secondary/95" },
+  { key: "carrier", header: "Carrier", className: "w-[8rem] min-w-[8rem]" },
+  { key: "amount", header: "Amount sought", className: "w-[7rem] min-w-[7rem] text-right" },
+  { key: "stage", header: "Current stage", className: "w-[9rem] min-w-[9rem]" },
+  { key: "nextAction", header: "Next action", className: "w-[10rem] min-w-[10rem]" },
+  { key: "nextDue", header: "Next-action due", className: "w-[7rem] min-w-[7rem]" },
+  { key: "warnings", header: "Primary status or warning", className: "w-[10rem] min-w-[10rem]" },
 ];
 
 export default async function MattersPage({ searchParams }: MattersPageProps) {
@@ -72,7 +72,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                 const href = matter.intakeStatus === "complete" ? `/matters/${matter.id}` : `/matters/${matter.id}/intake`;
                 return (
                   <TableRow className="group h-14 focus-within:bg-muted/50" key={matter.id}>
-                    <TableCell className="sticky left-0 z-10 w-[17rem] min-w-[17rem] bg-card px-3 py-2 group-hover:bg-muted/70">
+                    <TableCell className="sticky left-0 z-10 w-[12rem] min-w-[12rem] bg-card px-3 py-2 group-hover:bg-muted/70">
                       <Link className="block truncate font-medium text-foreground hover:underline" href={href} title={matter.matterName}>
                         {matter.matterName}
                       </Link>
@@ -83,24 +83,24 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                         <StatusBadge className="mt-2" status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} />
                       ) : null}
                     </TableCell>
-                    <TableCell className="w-[11rem] min-w-[11rem] truncate px-3 py-2 text-muted-foreground" title={matter.carrierName}>
+                    <TableCell className="w-[8rem] min-w-[8rem] truncate px-3 py-2 text-muted-foreground" title={matter.carrierName}>
                       {matter.carrierName}
                     </TableCell>
-                    <TableCell className="w-[9rem] min-w-[9rem] px-3 py-2 text-right font-medium">
+                    <TableCell className="w-[7rem] min-w-[7rem] px-3 py-2 text-right font-medium">
                       <CurrencyDisplay className="justify-end" value={matter.amountSought} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-[9rem] min-w-[9rem] px-3 py-2">
                       <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} />
                     </TableCell>
-                    <TableCell className="w-[18rem] min-w-[18rem] px-3 py-2 text-muted-foreground">
+                    <TableCell className="w-[10rem] min-w-[10rem] px-3 py-2 text-muted-foreground">
                       <span className="block truncate" title={matter.nextAction ?? "Not assigned"}>
                         {matter.nextAction ?? "Not assigned"}
                       </span>
                     </TableCell>
-                    <TableCell className="w-[10rem] min-w-[10rem] px-3 py-2 text-muted-foreground">
+                    <TableCell className="w-[7rem] min-w-[7rem] px-3 py-2 text-muted-foreground">
                       {matter.nextActionDueDate ? <DateDisplay value={matter.nextActionDueDate} /> : "Not set"}
                     </TableCell>
-                    <TableCell className="w-[14rem] min-w-[14rem] px-3 py-2">
+                    <TableCell className="w-[10rem] min-w-[10rem] px-3 py-2">
                       <MatterWarnings warnings={matter.warnings.slice(0, 1)} />
                     </TableCell>
                   </TableRow>

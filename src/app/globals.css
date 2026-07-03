@@ -7,7 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -49,45 +49,49 @@
 }
 
 :root {
-  --background: #f7f7f4;
+  --background: #f6f7f9;
   --foreground: #172033;
   --card: #ffffff;
   --card-foreground: #172033;
   --popover: #ffffff;
   --popover-foreground: #172033;
-  --primary: #1d3557;
+  --primary: #1e3a5f;
+  --primary-hover: #172f4e;
   --primary-foreground: #ffffff;
-  --secondary: #f0f1ed;
+  --secondary: #f9fafb;
   --secondary-foreground: #172033;
-  --muted: #f0f1ed;
+  --muted: #f9fafb;
   --muted-foreground: #667085;
+  --muted-foreground-subtle: #8a94a6;
   --accent: #eef1f4;
   --accent-foreground: #172033;
-  --destructive: #b94a48;
-  --border: #e7e7e2;
-  --input: #deded8;
-  --ring: #1d3557;
-  --chart-1: #1d3557;
+  --destructive: #b3413f;
+  --border: #e3e7ed;
+  --border-strong: #d2d8e1;
+  --input: #dde2e9;
+  --ring: #6b8db3;
+  --chart-1: #1e3a5f;
   --chart-2: #3f7d62;
   --chart-3: #a66a24;
-  --chart-4: #b94a48;
+  --chart-4: #b3413f;
   --chart-5: #667085;
-  --radius: 0.5rem;
+  --radius: 0.625rem;
   --success: #3f7d62;
-  --success-muted: #edf5f0;
+  --success-muted: #eaf3ee;
   --warning: #a66a24;
-  --warning-muted: #fbf2e6;
-  --urgent: #b94a48;
-  --urgent-muted: #fbefee;
-  --info-muted: #eef3f8;
+  --warning-muted: #faf1e4;
+  --urgent: #b3413f;
+  --urgent-muted: #f9ecea;
+  --info: #2f5f8a;
+  --info-muted: #ecf2f7;
   --sidebar: #ffffff;
   --sidebar-foreground: #172033;
-  --sidebar-primary: #1d3557;
+  --sidebar-primary: #1e3a5f;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f1ed;
+  --sidebar-accent: #f9fafb;
   --sidebar-accent-foreground: #172033;
-  --sidebar-border: #e7e7e2;
-  --sidebar-ring: #1d3557;
+  --sidebar-border: #e3e7ed;
+  --sidebar-ring: #6b8db3;
 }
 
 .dark {

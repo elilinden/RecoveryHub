@@ -1,4 +1,3 @@
-import { SectionHeader } from "@/components/common/section-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { initialGeneralSubrogationModel, validateAssessmentModel } from "@/lib/recovery-assessment/model";
 import type { Profile } from "@/lib/data/profiles";
@@ -12,11 +11,7 @@ export function RecoveryAssessmentSettings({ profile }: RecoveryAssessmentSettin
   const canManage = profile.role === "admin" || profile.role === "partner";
 
   return (
-    <div className="mt-5 space-y-4">
-      <SectionHeader
-        description="Versioned scoring configuration for structured recovery assessments."
-        title="Recovery Assessment"
-      />
+    <div className="mt-5">
       <Card className="border-border bg-background shadow-sm">
         <CardContent className="space-y-4 p-4">
           <div>

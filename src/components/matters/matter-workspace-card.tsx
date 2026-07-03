@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CurrencyDisplay } from "@/components/common/currency-display";
 import { DateDisplay } from "@/components/common/date-display";
 import { StatusBadge } from "@/components/common/status-badge";
+import { StatusBadgeList } from "@/components/common/status-badge-list";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   intakeStatusLabels,
@@ -83,14 +84,16 @@ export function MatterWorkspaceCard({ matter }: MatterWorkspaceCardProps) {
   );
 }
 
-export function MatterWarnings({ warnings }: { warnings: MatterWarning[] }) {
+export function MatterWarnings({ warnings, max = 3 }: { warnings: MatterWarning[]; max?: number }) {
   if (warnings.length === 0) return <StatusBadge status="No immediate action" />;
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {warnings.slice(0, 3).map((warning) => (
-        <StatusBadge key={warning} status={warningStatus[warning] ?? "Missing information"} />
-      ))}
-    </div>
+    <StatusBadgeList
+      items={warnings.map((warning) => ({
+        key: warning,
+        node: <StatusBadge status={warningStatus[warning] ?? "Missing information"} />,
+      }))}
+      max={max}
+    />
   );
 }

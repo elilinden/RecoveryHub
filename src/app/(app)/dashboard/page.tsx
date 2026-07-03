@@ -79,7 +79,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               <h2 className="text-xl font-semibold text-foreground">Action Center</h2>
               <p className="mt-1 text-sm text-muted-foreground">Everything that needs a decision today, in one place.</p>
             </div>
-            <TabsList className="mt-4 h-auto w-full flex-wrap justify-start gap-1 bg-secondary p-1">
+            <TabsList className="mt-4 min-h-11 w-full flex-wrap items-stretch justify-start gap-1 bg-secondary p-1">
               <TabsTrigger className="gap-1.5" value="urgent">
                 Urgent <TabCount value={urgentMatters.length} />
               </TabsTrigger>
@@ -166,7 +166,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <Card className="border-border bg-card shadow-sm">
           <CardContent className="p-5">
             <Tabs defaultValue="ready">
-              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-secondary p-1">
+              <TabsList className="min-h-11 w-full flex-wrap items-stretch justify-start gap-1 bg-secondary p-1">
                 <TabsTrigger value="ready">Ready for Demand <TabCount value={dashboard.readyForDemand.length} /></TabsTrigger>
                 <TabsTrigger value="opportunities">High-Value Opportunities <TabCount value={dashboard.highValueOpportunities.length} /></TabsTrigger>
                 <TabsTrigger value="assessment">Assessment Needed <TabCount value={dashboard.assessmentNeeded.length} /></TabsTrigger>

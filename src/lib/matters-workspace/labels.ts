@@ -115,10 +115,10 @@ export const matterEventLabels: Record<MatterEventType, string> = {
 };
 
 export const warningLabels: Record<MatterWarning, string> = {
-  overdue_next_action: "Overdue next action",
-  deadline_within_30: "Deadline within 30 days",
+  overdue_next_action: "Action overdue",
+  deadline_within_30: "Deadline soon",
   unverified_statute_deadline: "Unverified statute deadline",
-  missing_next_action: "Missing next action",
+  missing_next_action: "No next action",
   stale_matter: "Stale matter",
   draft_intake: "Draft intake",
   missing_information: "Missing information",

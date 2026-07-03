@@ -19,6 +19,17 @@ type MatterWorkspaceCardProps = {
 };
 
 const warningStatus: Partial<Record<MatterWarning, MatterStatus>> = {
+  overdue_next_action: "Action overdue",
+  deadline_within_30: "Deadline soon",
+  unverified_statute_deadline: "Unverified statute deadline",
+  missing_next_action: "No next action",
+  stale_matter: "Stale matter",
+  draft_intake: "Draft intake",
+  missing_information: "Missing information",
+  missing_required_evidence: "Missing information",
+};
+
+const warningDescriptions: Partial<Record<MatterWarning, string>> = {
   overdue_next_action: "Overdue next action",
   deadline_within_30: "Upcoming deadline",
   unverified_statute_deadline: "Unverified statute deadline",
@@ -26,7 +37,7 @@ const warningStatus: Partial<Record<MatterWarning, MatterStatus>> = {
   stale_matter: "Stale matter",
   draft_intake: "Draft intake",
   missing_information: "Missing information",
-  missing_required_evidence: "Missing information",
+  missing_required_evidence: "Missing required evidence",
 };
 
 export function MatterWorkspaceCard({ matter }: MatterWorkspaceCardProps) {
@@ -48,14 +59,21 @@ export function MatterWorkspaceCard({ matter }: MatterWorkspaceCardProps) {
             </div>
             <CurrencyDisplay className="shrink-0 text-sm font-semibold text-foreground" value={matter.amountSought} />
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} />
             <StatusBadge status={priorityLabels[matter.priority] as MatterStatus} />
-            {matter.intakeStatus !== "complete" ? <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} /> : null}
+            {matter.intakeStatus !== "complete" ? (
+              <>
+                <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} />
+                <span className="inline-flex h-6 items-center rounded-full bg-primary px-2.5 text-[13px] font-semibold text-primary-foreground">
+                  Resume Intake →
+                </span>
+              </>
+            ) : null}
           </div>
           {primaryWarning ? (
             <p className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground">
-              <span className="font-medium">Primary warning:</span> {warningLabels[primaryWarning]}
+              <span className="font-medium">Primary issue:</span> {warningLabels[primaryWarning]}
             </p>
           ) : null}
           <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
@@ -91,7 +109,13 @@ export function MatterWarnings({ warnings, max = 3 }: { warnings: MatterWarning[
     <StatusBadgeList
       items={warnings.map((warning) => ({
         key: warning,
-        node: <StatusBadge status={warningStatus[warning] ?? "Missing information"} />,
+        node: (
+          <StatusBadge
+            ariaLabel={warningDescriptions[warning]}
+            status={warningStatus[warning] ?? "Missing information"}
+            title={warningDescriptions[warning]}
+          />
+        ),
       }))}
       max={max}
     />

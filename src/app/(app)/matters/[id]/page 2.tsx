@@ -66,7 +66,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
       </section>
 
       <Tabs className="space-y-4" defaultValue="overview">
-        <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
+        <TabsList className="min-h-11 w-full flex-wrap items-stretch justify-start gap-1 rounded-lg border border-border bg-card p-1">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="financials">Financials</TabsTrigger>
           <TabsTrigger value="evidence">Evidence</TabsTrigger>

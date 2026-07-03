@@ -44,7 +44,16 @@ export function ProfileSettingsForm({ profile }: ProfileSettingsFormProps) {
         cannot be changed here.
       </div>
       {state.message ? (
-        <p className="rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground">{state.message}</p>
+        <p
+          className={
+            state.status === "success"
+              ? "rounded-lg bg-[var(--success-muted)] px-3 py-2 text-sm text-[var(--success)]"
+              : "rounded-lg bg-[var(--urgent-muted)] px-3 py-2 text-sm text-[var(--urgent)]"
+          }
+          role="status"
+        >
+          {state.message}
+        </p>
       ) : null}
       <Button className="w-fit" disabled={pending} type="submit">
         {pending ? "Saving..." : "Save profile"}

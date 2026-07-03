@@ -7,12 +7,12 @@ type FollowUpIndicatorsProps = {
 };
 
 const reasonLabels: Record<FollowUpReason, MatterStatus> = {
-  overdue_next_action: "Overdue next action",
-  missing_next_action: "Missing next action",
+  overdue_next_action: "Action overdue",
+  missing_next_action: "No next action",
   stale_matter: "Stale matter",
   awaiting_overdue_response: "Awaiting overdue response",
   unverified_statute_deadline: "Unverified statute deadline",
-  upcoming_deadline: "Upcoming deadline",
+  upcoming_deadline: "Deadline soon",
 };
 
 export function FollowUpIndicators({ reasons, includeUpcoming = false }: FollowUpIndicatorsProps) {

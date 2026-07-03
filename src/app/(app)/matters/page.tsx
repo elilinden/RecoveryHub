@@ -28,7 +28,7 @@ const matterColumns = [
   { key: "stage", header: "Current stage", className: "w-[9rem] min-w-[9rem]" },
   { key: "nextAction", header: "Next action", className: "w-[10rem] min-w-[10rem]" },
   { key: "nextDue", header: "Next-action due", className: "w-[7rem] min-w-[7rem]" },
-  { key: "warnings", header: "Primary status or warning", className: "w-[10rem] min-w-[10rem]" },
+  { key: "warnings", header: "Primary Issue", className: "w-[11rem] min-w-[11rem] pr-6" },
 ];
 
 export default async function MattersPage({ searchParams }: MattersPageProps) {
@@ -71,8 +71,8 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
               {result.items.map((matter) => {
                 const href = matter.intakeStatus === "complete" ? `/matters/${matter.id}` : `/matters/${matter.id}/intake`;
                 return (
-                  <TableRow className="group h-14 focus-within:bg-muted/50" key={matter.id}>
-                    <TableCell className="sticky left-0 z-10 w-[12rem] min-w-[12rem] bg-card px-3 py-2 group-hover:bg-muted/70">
+                  <TableRow className="group h-14 cursor-pointer transition-colors hover:bg-muted focus-within:bg-muted" key={matter.id}>
+                    <TableCell className="sticky left-0 z-10 w-[12rem] min-w-[12rem] bg-card px-3 py-2 group-hover:bg-muted">
                       <Link className="block truncate font-medium text-foreground hover:underline" href={href} title={matter.matterName}>
                         {matter.matterName}
                       </Link>
@@ -80,7 +80,12 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                         {matter.carrierClaimNumber ?? "No claim number"}
                       </p>
                       {matter.intakeStatus !== "complete" ? (
-                        <StatusBadge className="mt-2" status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} />
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} />
+                          <Link className="text-xs font-semibold text-primary hover:underline" href={href}>
+                            Resume →
+                          </Link>
+                        </div>
                       ) : null}
                     </TableCell>
                     <TableCell className="w-[8rem] min-w-[8rem] truncate px-3 py-2 text-muted-foreground" title={matter.carrierName}>
@@ -100,7 +105,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                     <TableCell className="w-[7rem] min-w-[7rem] px-3 py-2 text-muted-foreground">
                       {matter.nextActionDueDate ? <DateDisplay value={matter.nextActionDueDate} /> : "Not set"}
                     </TableCell>
-                    <TableCell className="w-[10rem] min-w-[10rem] px-3 py-2">
+                    <TableCell className="w-[11rem] min-w-[11rem] px-3 py-2 pr-6">
                       <MatterWarnings warnings={matter.warnings.slice(0, 1)} />
                     </TableCell>
                   </TableRow>

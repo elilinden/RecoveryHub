@@ -64,7 +64,7 @@ export function MatterDocumentsPackagesPanel({
 }: MatterDocumentsPackagesPanelProps) {
   return (
     <Tabs className="space-y-4" defaultValue="documents">
-      <TabsList className="h-auto w-full flex-wrap justify-start rounded-lg border border-border bg-card p-1 [&_[data-slot=tabs-trigger]]:min-h-9 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:px-3">
+      <TabsList className="min-h-11 w-full flex-wrap items-stretch justify-start gap-1 rounded-lg border border-border bg-card p-1 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:px-3">
         <TabsTrigger value="documents">Documents</TabsTrigger>
         <TabsTrigger value="packages">Packages</TabsTrigger>
       </TabsList>

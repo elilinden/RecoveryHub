@@ -150,3 +150,106 @@
     min-width: 320px;
   }
 }
+
+@layer components {
+  .package-queue {
+    container-type: inline-size;
+    overflow: hidden;
+  }
+
+  .package-queue-grid {
+    display: grid;
+    grid-template-columns:
+      minmax(16rem, 1.7fr)
+      minmax(9rem, 0.85fr)
+      minmax(8.5rem, 0.75fr)
+      minmax(8.5rem, 0.7fr)
+      minmax(8rem, 0.6fr);
+    gap: 0.75rem;
+  }
+
+  .package-queue-header {
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    background: var(--secondary);
+    padding: 0.625rem 0.875rem;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .package-queue-row {
+    align-items: start;
+    border-bottom: 1px solid var(--border);
+    padding: 0.875rem;
+    transition: background-color 150ms ease;
+  }
+
+  .package-queue-row:hover {
+    background: color-mix(in srgb, var(--muted), transparent 35%);
+  }
+
+  .package-queue-rowgroup:last-child .package-queue-row {
+    border-bottom: 0;
+  }
+
+  .package-queue-cell {
+    min-width: 0;
+  }
+
+  .package-queue-status-action {
+    display: none;
+  }
+
+  .package-queue-status-action-label {
+    display: none;
+  }
+
+  .package-queue-details {
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--secondary), transparent 35%);
+    padding: 1rem;
+  }
+
+  .package-queue-details-cell {
+    min-width: 0;
+  }
+
+  .package-queue-mobile {
+    display: none;
+  }
+
+  @container (max-width: 980px) {
+    .package-queue-grid {
+      grid-template-columns:
+        minmax(13rem, 1.5fr)
+        minmax(8rem, 0.8fr)
+        minmax(7.75rem, 0.75fr)
+        minmax(9rem, 0.8fr);
+    }
+
+    .package-queue-action-header,
+    .package-queue-action-cell {
+      display: none;
+    }
+
+    .package-queue-status-action {
+      display: flex;
+    }
+
+    .package-queue-status-action-label {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 720px) {
+    .package-queue-desktop {
+      display: none;
+    }
+
+    .package-queue-mobile {
+      display: grid;
+    }
+  }
+}

@@ -1,7 +1,8 @@
-import { Bell, Building2, FileText, GitBranch, LockKeyhole, Scale, UserRound } from "lucide-react";
+import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
+import { Bell, FileText, GitBranch, LockKeyhole, Scale, UserRound } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
-import { SectionHeader } from "@/components/common/section-header";
 import { ProfileSettingsForm } from "@/components/settings/profile-settings-form";
 import { RecoveryAssessmentSettings } from "@/components/settings/recovery-assessment-settings";
 import { DocumentTemplateSettings } from "@/components/settings/document-template-settings";
@@ -10,88 +11,89 @@ import { Card, CardContent } from "@/components/ui/card";
 import { requireActiveProfile } from "@/lib/auth/session";
 import { loadDocumentTemplates } from "@/lib/documents-packages/data";
 import { loadTriageSettings } from "@/lib/triage/data";
+import { cn } from "@/lib/utils";
 
-const settingsSections = [
-  {
-    title: "Profile",
-    description: "Name, role, and internal account details.",
-    icon: UserRound,
-  },
-  {
-    title: "Firm preferences",
-    description: "Default matter views, currency display, and work queue settings.",
-    icon: Building2,
-  },
-  {
-    title: "Workflow & Triage",
-    description: "Set the timing rules that decide when a matter gets flagged for attention.",
-    icon: GitBranch,
-  },
-  {
-    title: "Recovery Assessment",
-    description: "Versioned scoring models and recommendation bands.",
-    icon: Scale,
-  },
-  {
-    title: "Document Templates",
-    description: "Versioned non-AI package templates and approval controls.",
-    icon: FileText,
-  },
-  {
-    title: "Notifications",
-    description: "Deadline reminders, missing information nudges, and referral alerts.",
-    icon: Bell,
-  },
-  {
-    title: "Security",
-    description: "Authentication and session controls will be connected later.",
-    icon: LockKeyhole,
-  },
+type SettingsPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type SettingsSection = {
+  slug: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  comingSoon?: boolean;
+};
+
+const settingsSections: SettingsSection[] = [
+  { slug: "profile", title: "Profile", description: "Your name, role, and account details.", icon: UserRound },
+  { slug: "workflow", title: "Workflow & Triage", description: "Set the timing rules that decide when a matter gets flagged for attention.", icon: GitBranch },
+  { slug: "assessment", title: "Recovery Assessment", description: "The scoring model used to assess recovery matters.", icon: Scale },
+  { slug: "documents", title: "Document Templates", description: "Approved templates used to prepare packages.", icon: FileText },
+  { slug: "notifications", title: "Notifications", description: "Deadline reminders, missing-information nudges, and referral alerts.", icon: Bell, comingSoon: true },
+  { slug: "security", title: "Security", description: "Authentication and session controls.", icon: LockKeyhole, comingSoon: true },
 ];
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+  const params = (await searchParams) ?? {};
   const { profile } = await requireActiveProfile();
-  const [triageSettings, documentTemplates] = await Promise.all([
-    loadTriageSettings(profile),
-    loadDocumentTemplates(profile),
-  ]);
+  const [triageSettings, documentTemplates] = await Promise.all([loadTriageSettings(profile), loadDocumentTemplates(profile)]);
+
+  const activeSlug = readParam(params.section);
+  const active = settingsSections.find((section) => section.slug === activeSlug) ?? settingsSections[0];
+  const ActiveIcon = active.icon;
 
   return (
     <div className="space-y-6">
-      <PageHeader subtitle="Nonfunctional placeholders for future firm and account controls." title="Settings" />
-      <div className="grid gap-4 lg:grid-cols-2">
-        {settingsSections.map((section) => {
-          const Icon = section.icon;
+      <PageHeader subtitle="Manage your profile, workflow rules, and firm configuration." title="Settings" />
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <nav aria-label="Settings sections" className="flex gap-2 overflow-x-auto pb-1 lg:w-60 lg:shrink-0 lg:flex-col lg:overflow-visible lg:pb-0">
+          {settingsSections.map((section) => {
+            const Icon = section.icon;
+            const isActive = section.slug === active.slug;
 
-          return (
-            <Card className="border-border bg-card shadow-sm" key={section.title}>
-              <CardContent className="p-5">
-                <div className="flex items-start gap-4">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                    <Icon aria-hidden="true" className="size-5" />
-                  </div>
-                  <div>
-                    <SectionHeader description={section.description} title={section.title} />
-                    {section.title === "Profile" ? (
-                      <ProfileSettingsForm profile={profile} />
-                    ) : section.title === "Workflow & Triage" ? (
-                      <TriageSettingsForm result={triageSettings} />
-                    ) : section.title === "Recovery Assessment" ? (
-                      <RecoveryAssessmentSettings profile={profile} />
-                    ) : section.title === "Document Templates" ? (
-                      <DocumentTemplateSettings profile={profile} templates={documentTemplates} />
-                    ) : (
-                      <div className="mt-5 rounded-lg border border-dashed border-border bg-background px-4 py-5 text-sm text-muted-foreground">
-                        Configuration controls will be added in a later phase.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+            return (
+              <Link
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  isActive ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                )}
+                href={`/settings?section=${section.slug}`}
+                key={section.slug}
+              >
+                <Icon aria-hidden="true" className="size-4 shrink-0" />
+                <span className="whitespace-nowrap">{section.title}</span>
+                {section.comingSoon ? <span className="ml-auto shrink-0 text-[11px] font-normal text-muted-foreground">Soon</span> : null}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <Card className="min-w-0 flex-1 border-border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">{active.title}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{active.description}</p>
+            </div>
+
+            {active.slug === "profile" ? <ProfileSettingsForm profile={profile} /> : null}
+            {active.slug === "workflow" ? <TriageSettingsForm result={triageSettings} /> : null}
+            {active.slug === "assessment" ? <RecoveryAssessmentSettings profile={profile} /> : null}
+            {active.slug === "documents" ? <DocumentTemplateSettings profile={profile} templates={documentTemplates} /> : null}
+            {active.comingSoon ? (
+              <div className="mt-5 flex items-center gap-3 rounded-lg bg-secondary/60 px-4 py-4 text-sm text-muted-foreground">
+                <ActiveIcon aria-hidden="true" className="size-5 shrink-0" />
+                <span>{active.title} is coming soon. This section will appear here once it&apos;s available.</span>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
+}
+
+function readParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

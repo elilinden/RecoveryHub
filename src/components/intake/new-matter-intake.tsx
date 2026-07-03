@@ -55,10 +55,17 @@ const steps = [
 
 const localStorageKey = "recovery-hub:new-matter-intake";
 
-function Field({ label, children, error, help }: { label: string; children: React.ReactNode; error?: string; help?: string }) {
+function Field({ label, children, error, help, required }: { label: string; children: React.ReactNode; error?: string; help?: string; required?: boolean }) {
   return (
     <div className="space-y-2">
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-sm font-medium text-foreground">
+        {label}
+        {required ? (
+          <span aria-hidden="true" className="ml-0.5 text-[var(--urgent)]">
+            *
+          </span>
+        ) : null}
+      </Label>
       {children}
       {error ? <p className="text-sm text-[var(--urgent)]">{error}</p> : null}
       {help ? <p className="text-sm leading-5 text-muted-foreground">{help}</p> : null}
@@ -119,6 +126,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatterMatch[]>([]);
   const [acknowledgedDuplicate, setAcknowledgedDuplicate] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(() => Boolean(initialMatterId ?? initialData?.id));
+  const [dirty, setDirty] = useState(false);
   const pendingAutosave = useRef(false);
 
   const selectedCarrier = options.carriers.find((carrier) => carrier.id === data.stepOne.carrierId);
@@ -142,12 +151,13 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
       event.preventDefault();
     };
 
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, []);
+  }, [dirty]);
 
   useEffect(() => {
     if (!matterId) return;
@@ -162,6 +172,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
           setSaveState("saved");
           setLastSavedAt(result.savedAt);
           setMessage(undefined);
+          setDirty(false);
         } else {
           setSaveState("error");
           setMessage(result.message);
@@ -182,6 +193,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
       },
     }));
     setFieldErrors((current) => ({ ...current, [key]: "" }));
+    setHasInteracted(true);
+    setDirty(true);
   }
 
   function updateStepTwo<K extends keyof IntakeFormData["stepTwo"]>(key: K, value: IntakeFormData["stepTwo"][K]) {
@@ -197,11 +210,15 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
       }
       return { ...current, stepTwo: next };
     });
+    setHasInteracted(true);
+    setDirty(true);
   }
 
   function updateStepThree<K extends keyof IntakeFormData["stepThree"]>(key: K, value: IntakeFormData["stepThree"][K]) {
     setData((current) => ({ ...current, stepThree: { ...current.stepThree, [key]: value } }));
     setFieldErrors((current) => ({ ...current, [key]: "" }));
+    setHasInteracted(true);
+    setDirty(true);
   }
 
   async function continueStep() {
@@ -238,6 +255,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
       setSaveState("saved");
       setLastSavedAt(result.savedAt);
       setMessage(result.message);
+      setDirty(false);
       window.localStorage.removeItem(localStorageKey);
       if (result.redirectTo) router.push(result.redirectTo);
     } else {
@@ -393,7 +411,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                     data={data}
                     errors={fieldErrors}
                     options={options}
-                    unresolvedIssues={unresolvedIssues}
+                    unresolvedIssues={hasInteracted ? unresolvedIssues : []}
                     update={updateStepThree}
                   />
                 ) : null}
@@ -462,6 +480,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
 
         <IntakeSummary
           data={data}
+          hasInteracted={hasInteracted}
           options={options}
           selectedAdjuster={assignedAdjuster}
           selectedCarrier={selectedCarrier}
@@ -543,7 +562,7 @@ function MatterDetailsStep(props: {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-foreground">Referral Information</h3>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field error={errors.carrierId} label="Carrier">
+          <Field error={errors.carrierId} required label="Carrier">
             <select className={selectClass(errors.carrierId)} value={data.stepOne.carrierId} onChange={(event) => update("carrierId", event.target.value)}>
               <option value="">Select carrier</option>
               {options.carriers.map((carrier) => (
@@ -553,16 +572,16 @@ function MatterDetailsStep(props: {
               ))}
             </select>
           </Field>
-          <Field error={errors.carrierClaimNumber} label="Carrier claim number">
+          <Field error={errors.carrierClaimNumber} required label="Carrier claim number">
             <Input className={inputClass(errors.carrierClaimNumber)} value={data.stepOne.carrierClaimNumber} onChange={(event) => update("carrierClaimNumber", event.target.value)} />
           </Field>
           <Field label="Firm matter number">
             <Input className={inputClass()} value={data.stepOne.firmMatterNumber ?? ""} onChange={(event) => update("firmMatterNumber", event.target.value)} />
           </Field>
-          <Field error={errors.matterName} label="Matter name">
+          <Field error={errors.matterName} required label="Matter name">
             <Input className={inputClass(errors.matterName)} value={data.stepOne.matterName} onChange={(event) => update("matterName", event.target.value)} />
           </Field>
-          <Field error={errors.matterType} label="Matter type">
+          <Field error={errors.matterType} required label="Matter type">
             <select className={selectClass(errors.matterType)} value={data.stepOne.matterType} onChange={(event) => update("matterType", event.target.value as IntakeFormData["stepOne"]["matterType"])}>
               {matterTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -571,7 +590,7 @@ function MatterDetailsStep(props: {
               ))}
             </select>
           </Field>
-          <Field error={errors.dateReferred} label="Date referred">
+          <Field error={errors.dateReferred} required label="Date referred">
             <Input className={inputClass(errors.dateReferred)} type="date" value={data.stepOne.dateReferred} onChange={(event) => update("dateReferred", event.target.value)} />
           </Field>
           <Field label="Date of loss">
@@ -632,7 +651,7 @@ function MatterDetailsStep(props: {
         <h3 className="text-lg font-semibold text-foreground">Firm Assignment</h3>
         {responsibleUsers.length === 0 ? <EmptyState description="No eligible active users are available for assignment." title="No eligible assignees" /> : null}
         <div className="grid gap-4 md:grid-cols-3">
-          <Field error={errors.assignedAttorneyId} label="Assigned attorney">
+          <Field error={errors.assignedAttorneyId} required label="Assigned attorney">
             <select className={selectClass(errors.assignedAttorneyId)} value={data.stepOne.assignedAttorneyId ?? ""} onChange={(event) => update("assignedAttorneyId", event.target.value)}>
               <option value="">Select attorney</option>
               {attorneys.map((user) => (
@@ -985,7 +1004,7 @@ function ReviewRouteStep(props: {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-foreground">Deadlines</h3>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field error={errors.statuteDeadline} help="Entered is not the same as attorney verified." label="Statute-of-limitations deadline">
+          <Field error={errors.statuteDeadline} required help="Entered is not the same as attorney verified." label="Statute-of-limitations deadline">
             <Input className={inputClass(errors.statuteDeadline)} type="date" value={data.stepThree.statuteDeadline ?? ""} onChange={(event) => update("statuteDeadline", event.target.value)} />
           </Field>
           <Field label="Reminder date"><Input type="date" value={data.stepThree.reminderDate ?? ""} onChange={(event) => update("reminderDate", event.target.value)} /></Field>
@@ -1012,7 +1031,7 @@ function ReviewRouteStep(props: {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-foreground">Priority and Routing</h3>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field error={errors.priority} label="Initial priority">
+          <Field error={errors.priority} required label="Initial priority">
             <select className={selectClass(errors.priority)} value={data.stepThree.priority} onChange={(event) => update("priority", event.target.value as never)}>
               {priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
@@ -1022,15 +1041,15 @@ function ReviewRouteStep(props: {
               {stageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
-          <Field error={errors.nextAction} label="Next action">
+          <Field error={errors.nextAction} required label="Next action">
             <select className={selectClass(errors.nextAction)} value={data.stepThree.nextAction} onChange={(event) => update("nextAction", event.target.value as never)}>
               {nextActionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
           </Field>
-          <Field error={errors.nextActionDueDate} label="Next-action due date">
+          <Field error={errors.nextActionDueDate} required label="Next-action due date">
             <Input className={inputClass(errors.nextActionDueDate)} type="date" value={data.stepThree.nextActionDueDate} onChange={(event) => update("nextActionDueDate", event.target.value)} />
           </Field>
-          <Field error={errors.nextActionAssignedTo} label="Assigned person responsible">
+          <Field error={errors.nextActionAssignedTo} required label="Assigned person responsible">
             <select className={selectClass(errors.nextActionAssignedTo)} value={data.stepThree.nextActionAssignedTo} onChange={(event) => update("nextActionAssignedTo", event.target.value)}>
               <option value="">Select person</option>
               {options.users.map((user) => <option key={user.id} value={user.id}>{user.fullName} {user.jobTitle ? `- ${user.jobTitle}` : ""}</option>)}
@@ -1083,30 +1102,55 @@ function IntakeSummary(props: {
   selectedCarrier?: { id: string; name: string };
   selectedAdjuster?: IntakeCarrierContact;
   unresolvedIssues: string[];
+  hasInteracted: boolean;
 }) {
-  const { data, selectedCarrier, selectedAdjuster, unresolvedIssues, options } = props;
+  const { data, selectedCarrier, selectedAdjuster, unresolvedIssues, options, hasInteracted } = props;
   const attorney = options.users.find((user) => user.id === data.stepOne.assignedAttorneyId);
+  const matterLabel = data.stepOne.matterName || "New matter";
+  const issueLabel = !hasInteracted
+    ? "Fill in the fields to see a routing summary."
+    : unresolvedIssues.length === 0
+      ? "No obvious routing issues."
+      : `${unresolvedIssues.length} issue${unresolvedIssues.length === 1 ? "" : "s"} to review.`;
+
+  const body = (
+    <>
+      <dl className="mt-4 space-y-3 text-sm">
+        <div><dt className="text-muted-foreground">Matter</dt><dd className="font-medium text-foreground">{data.stepOne.matterName || "Unnamed matter"}</dd></div>
+        <div><dt className="text-muted-foreground">Carrier</dt><dd className="font-medium text-foreground">{selectedCarrier?.name ?? "Not selected"}</dd></div>
+        <div><dt className="text-muted-foreground">Claim</dt><dd className="font-medium text-foreground">{data.stepOne.carrierClaimNumber || "Not entered"}</dd></div>
+        <div><dt className="text-muted-foreground">Adjuster</dt><dd className="font-medium text-foreground">{selectedAdjuster?.fullName ?? "Not assigned"}</dd></div>
+        <div><dt className="text-muted-foreground">Attorney</dt><dd className="font-medium text-foreground">{attorney?.fullName ?? "Not assigned"}</dd></div>
+        <div><dt className="text-muted-foreground">Amount sought</dt><dd className="font-medium text-foreground"><CurrencyDisplay value={Number(data.stepTwo.amountSought || 0)} /></dd></div>
+        <div><dt className="text-muted-foreground">Next action</dt><dd className="font-medium text-foreground">{data.stepThree.nextAction}</dd></div>
+        {data.stepThree.nextActionDueDate ? <div><dt className="text-muted-foreground">Next-action due</dt><dd className="font-medium text-foreground"><DateDisplay value={data.stepThree.nextActionDueDate} /></dd></div> : null}
+      </dl>
+      <div className="mt-4 rounded-lg bg-secondary/60 p-3 text-sm text-muted-foreground">{issueLabel}</div>
+    </>
+  );
 
   return (
-    <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-      <Card className="border-border bg-card shadow-sm">
+    <aside className="space-y-4">
+      {/* Desktop: always-visible sticky summary */}
+      <Card className="hidden border-border bg-card shadow-sm xl:sticky xl:top-6 xl:block xl:self-start">
         <CardContent className="p-5">
           <h2 className="text-lg font-semibold text-foreground">Intake Summary</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div><dt className="text-muted-foreground">Matter</dt><dd className="font-medium text-foreground">{data.stepOne.matterName || "Unnamed matter"}</dd></div>
-            <div><dt className="text-muted-foreground">Carrier</dt><dd className="font-medium text-foreground">{selectedCarrier?.name ?? "Not selected"}</dd></div>
-            <div><dt className="text-muted-foreground">Claim</dt><dd className="font-medium text-foreground">{data.stepOne.carrierClaimNumber || "Not entered"}</dd></div>
-            <div><dt className="text-muted-foreground">Adjuster</dt><dd className="font-medium text-foreground">{selectedAdjuster?.fullName ?? "Not assigned"}</dd></div>
-            <div><dt className="text-muted-foreground">Attorney</dt><dd className="font-medium text-foreground">{attorney?.fullName ?? "Not assigned"}</dd></div>
-            <div><dt className="text-muted-foreground">Amount sought</dt><dd className="font-medium text-foreground"><CurrencyDisplay value={Number(data.stepTwo.amountSought || 0)} /></dd></div>
-            <div><dt className="text-muted-foreground">Next action</dt><dd className="font-medium text-foreground">{data.stepThree.nextAction}</dd></div>
-            {data.stepThree.nextActionDueDate ? <div><dt className="text-muted-foreground">Next-action due</dt><dd className="font-medium text-foreground"><DateDisplay value={data.stepThree.nextActionDueDate} /></dd></div> : null}
-          </dl>
-          <div className="mt-4 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">
-            {unresolvedIssues.length === 0 ? "No obvious routing issues." : `${unresolvedIssues.length} issue${unresolvedIssues.length === 1 ? "" : "s"} to review.`}
-          </div>
+          {body}
         </CardContent>
       </Card>
+
+      {/* Mobile and tablet: collapsed by default so it doesn't push the form down */}
+      <details className="group rounded-lg border border-border bg-card shadow-sm xl:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-semibold text-foreground">
+          <span>
+            Intake Summary <span className="font-normal text-muted-foreground">· {matterLabel}</span>
+          </span>
+          <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-180">
+            ▾
+          </span>
+        </summary>
+        <div className="px-4 pb-4">{body}</div>
+      </details>
     </aside>
   );
 }

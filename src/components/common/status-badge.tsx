@@ -21,6 +21,8 @@ type Tone = "neutral" | "success" | "warning" | "urgent" | "info";
 type StatusBadgeProps = {
   status: MatterStatus;
   className?: string;
+  title?: string;
+  ariaLabel?: string;
 };
 
 const toneClasses: Record<Tone, string> = {
@@ -61,22 +63,24 @@ const statusConfig: Record<MatterStatus, { tone: Tone; icon: ComponentType<{ cla
   Other: { tone: "neutral", icon: Circle },
   "Deadline verified": { tone: "success", icon: CheckCircle2 },
   "Unverified statute deadline": { tone: "urgent", icon: AlertCircle },
-  "Overdue next action": { tone: "urgent", icon: Clock3 },
+  "Action overdue": { tone: "urgent", icon: Clock3 },
   "Stale matter": { tone: "warning", icon: Clock3 },
   "Awaiting overdue response": { tone: "warning", icon: Clock3 },
-  "Missing next action": { tone: "warning", icon: FileQuestion },
-  "Upcoming deadline": { tone: "info", icon: Clock3 },
+  "No next action": { tone: "warning", icon: FileQuestion },
+  "Deadline soon": { tone: "info", icon: Clock3 },
   "Draft intake": { tone: "warning", icon: FileQuestion },
   "Intake in progress": { tone: "info", icon: Clock3 },
   "Intake complete": { tone: "success", icon: CheckCircle2 },
 };
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, className, title, ariaLabel }: StatusBadgeProps) {
   const config = statusConfig[status] ?? { tone: "neutral" as const, icon: Circle };
   const Icon = config.icon;
 
   return (
     <Badge
+      aria-label={ariaLabel}
+      title={title}
       variant="outline"
       className={cn("h-6 rounded-full px-2.5 text-[13px]", toneClasses[config.tone], className)}
     >

@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
-type BridgeStatus = "idle" | "checking" | "ready" | "error";
+import { Button } from "@/components/ui/button";
 
-function initialStatus(): BridgeStatus {
-  if (typeof window === "undefined") return "idle";
-  return window.location.hash.includes("access_token") ? "checking" : "idle";
+type ExchangePhase = "idle" | "checking" | "ready" | "error";
+
+const subscribe = () => () => {};
+
+function hasInviteHash() {
+  return window.location.hash.includes("access_token");
 }
 
 /**
@@ -14,12 +17,24 @@ function initialStatus(): BridgeStatus {
  * inviteUserByEmail), so the session tokens arrive in the URL hash fragment,
  * which never reaches the server. This establishes the session client-side
  * before the reset-password form submits.
+ *
+ * The token exchange only runs after an explicit "Continue" click rather than
+ * automatically on page load. Corporate/institutional email security scanners
+ * (Microsoft Safe Links, Proofpoint, Mimecast, etc.) pre-visit every link in
+ * an incoming email with a real headless browser to scan it, which would
+ * otherwise silently consume this one-time link before the recipient ever
+ * opens it. Scanners load pages; they don't click buttons.
+ *
+ * The hash can only be read client-side (the server never sees it), so
+ * detecting it goes through useSyncExternalStore rather than a state
+ * initializer, to avoid a server/client hydration mismatch.
  */
 export function InviteSessionBridge() {
-  const [status, setStatus] = useState<BridgeStatus>(initialStatus);
+  const hasHashToken = useSyncExternalStore(subscribe, hasInviteHash, () => false);
+  const [phase, setPhase] = useState<ExchangePhase>("idle");
 
   useEffect(() => {
-    if (status !== "checking") return;
+    if (phase !== "checking") return;
 
     let cancelled = false;
     const hash = window.location.hash;
@@ -29,13 +44,13 @@ export function InviteSessionBridge() {
 
     (async () => {
       if (!access_token || !refresh_token) {
-        if (!cancelled) setStatus("error");
+        if (!cancelled) setPhase("error");
         return;
       }
 
       const { isSupabaseConfigured } = await import("@/lib/supabase/env");
       if (!isSupabaseConfigured()) {
-        if (!cancelled) setStatus("error");
+        if (!cancelled) setPhase("error");
         return;
       }
 
@@ -43,15 +58,30 @@ export function InviteSessionBridge() {
       const supabase = createClient();
       const { error } = await supabase.auth.setSession({ access_token, refresh_token });
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      if (!cancelled) setStatus(error ? "error" : "ready");
+      if (!cancelled) setPhase(error ? "error" : "ready");
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [phase]);
 
-  if (status === "checking") {
+  if (!hasHashToken) {
+    return null;
+  }
+
+  if (phase === "idle") {
+    return (
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-secondary px-3 py-3 text-sm text-foreground">
+        <p>Click continue to open your invitation and set up your account.</p>
+        <Button onClick={() => setPhase("checking")} type="button">
+          Continue
+        </Button>
+      </div>
+    );
+  }
+
+  if (phase === "checking") {
     return (
       <p className="rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground" role="status">
         Preparing your account...
@@ -59,7 +89,7 @@ export function InviteSessionBridge() {
     );
   }
 
-  if (status === "error") {
+  if (phase === "error") {
     return (
       <p className="rounded-lg border border-[color:var(--urgent)]/20 bg-[var(--urgent-muted)] px-3 py-2 text-sm text-[var(--urgent)]" role="alert">
         This invitation link is expired or invalid. Ask an administrator to resend it.

@@ -429,7 +429,7 @@ function createPackage(input: {
     responsiblePartySnapshot: "Jordan Collins",
     carrierNameSnapshot: matter.carrierName,
     matterAmountSoughtSnapshot: matter.amountSought,
-    notes: "Fictional development package. No email delivery is available.",
+    notes: "Fictional development package for local preview only.",
     assignedToName: matter.assignedFirmUser,
     createdByName: "Nora Chen",
     submittedForReviewAt: input.status === "ready_for_review" || input.status === "approved_for_send" ? "2026-07-03T15:00:00.000Z" : null,

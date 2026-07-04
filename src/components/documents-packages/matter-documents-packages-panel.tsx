@@ -91,7 +91,7 @@ export function MatterDocumentsPackagesPanel({
           <Card className="border-border bg-card shadow-sm">
             <CardContent className="space-y-4 p-5">
               <SectionHeader
-                description="Create and validate outgoing packages for later review and delivery. This phase never sends email."
+                description="Create and validate outgoing packages for later review and delivery."
                 title="Outbound Packages"
               />
               {permissions.canBuildPackages ? <CreatePackageForm matterAmountSought={matterAmountSought} matterId={matterId} templates={templates} /> : null}

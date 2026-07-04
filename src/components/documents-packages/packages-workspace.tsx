@@ -76,9 +76,6 @@ export function PackagesWorkspace({ result }: PackagesWorkspaceProps) {
             description="Search, filter, validate, and review packages prepared for later delivery."
             title="Package Queue"
           />
-          <p className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground" role="note">
-            Packages may be prepared and approved here. Delivery will be added in a later phase.
-          </p>
           <form action="/packages" className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
             <label className="relative min-w-0 flex-1">
               <span className="sr-only">Search packages</span>

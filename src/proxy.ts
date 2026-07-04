@@ -5,7 +5,11 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getSupabaseConfig } from "@/lib/supabase/env";
 
 const protectedPrefixes = ["/dashboard", "/matters", "/settings"];
-const authPrefixes = ["/login", "/forgot-password", "/reset-password"];
+const authPrefixes = ["/login", "/forgot-password"];
+// Reachable by an authenticated OR unauthenticated request: an invited/recovering user
+// arrives here with a brand-new, possibly still-inactive session and must be able to set
+// a password before any is_active check applies.
+const passwordSetupPrefixes = ["/reset-password"];
 
 export async function proxy(request: NextRequest) {
   const config = getSupabaseConfig();
@@ -32,8 +36,9 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isProtected = protectedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   const isAuthRoute = authPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  const isPasswordSetup = passwordSetupPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
-  if (!isProtected && !isAuthRoute) {
+  if (!isProtected && !isAuthRoute && !isPasswordSetup) {
     await supabase.auth.getUser();
     return response;
   }
@@ -49,6 +54,10 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!user) {
+    return response;
+  }
+
+  if (isPasswordSetup) {
     return response;
   }
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AlertCircle, CheckCircle2, Clock3, PlusCircle, Save } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, Clock3, PlusCircle, Save, X } from "lucide-react";
 
 import { CurrencyDisplay } from "@/components/common/currency-display";
 import { DateDisplay } from "@/components/common/date-display";
@@ -11,6 +11,14 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,11 +35,13 @@ import {
   createEmptyIntake,
   evidenceTypeOptions,
   evidenceStatusOptions,
+  getIntakeIssueGroups,
   insuranceStatusOptions,
   matterTypeOptions,
   nextActionOptions,
   partyRoleOptions,
   priorityOptions,
+  recommendedEvidenceByMatterType,
   stageOptions,
   validateIntakeStep,
   yesNoUnknownOptions,
@@ -55,7 +65,6 @@ const steps = [
 ] as const;
 
 const localStorageKey = "recovery-hub:new-matter-intake";
-
 function Field({ label, children, error, help, required }: { label: string; children: React.ReactNode; error?: string; help?: string; required?: boolean }) {
   return (
     <div className="space-y-2">
@@ -112,6 +121,12 @@ function userNames(users: IntakeUser[], ids: string[]) {
     .map((id) => users.find((user) => user.id === id)?.fullName)
     .filter((name): name is string => Boolean(name));
   return names.length > 0 ? names.join(", ") : "Not assigned";
+}
+
+function mergeCarrierContacts(incoming: IntakeCarrierContact[], existing: IntakeCarrierContact[]) {
+  const contacts = new Map(existing.map((contact) => [contact.id, contact]));
+  incoming.forEach((contact) => contacts.set(contact.id, contact));
+  return Array.from(contacts.values()).sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 function normalizeIntakeData(input?: Partial<IntakeFormData> | null): IntakeFormData {
@@ -181,20 +196,26 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   const [cancelOpen, setCancelOpen] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(() => Boolean(initialMatterId ?? initialData?.id));
   const [dirty, setDirty] = useState(false);
+  const [addedCarrierContacts, setAddedCarrierContacts] = useState<IntakeCarrierContact[]>([]);
   const pendingAutosave = useRef(false);
 
+  const carrierContacts = useMemo(
+    () => mergeCarrierContacts(addedCarrierContacts, options.carrierContacts),
+    [addedCarrierContacts, options.carrierContacts]
+  );
   const selectedCarrier = options.carriers.find((carrier) => carrier.id === data.stepOne.carrierId);
   const adjusters = useMemo(
-    () => filterContactsByCarrier(options.carrierContacts, data.stepOne.carrierId, "adjuster"),
-    [options.carrierContacts, data.stepOne.carrierId]
+    () => filterContactsByCarrier(carrierContacts, data.stepOne.carrierId, "adjuster"),
+    [carrierContacts, data.stepOne.carrierId]
   );
   const supervisors = useMemo(
-    () => options.carrierContacts.filter((contact) => contact.carrierId === data.stepOne.carrierId && contact.contactType !== "adjuster"),
-    [options.carrierContacts, data.stepOne.carrierId]
+    () => carrierContacts.filter((contact) => contact.carrierId === data.stepOne.carrierId && contact.contactType !== "adjuster"),
+    [carrierContacts, data.stepOne.carrierId]
   );
-  const assignedAdjuster = options.carrierContacts.find((contact) => contact.id === data.stepOne.assignedAdjusterId);
+  const assignedAdjuster = carrierContacts.find((contact) => contact.id === data.stepOne.assignedAdjusterId);
   const suggestedAmount = calculateSuggestedAmountSought(data.stepTwo);
-  const unresolvedIssues = getUnresolvedIssues(data);
+  const issueGroups = getIntakeIssueGroups(data);
+  const unresolvedIssues = [...issueGroups.required, ...issueGroups.followUp];
 
   useEffect(() => {
     if (!matterId) {
@@ -351,7 +372,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
     }
   }
 
-  function addParty(mode: "contact" | "organization") {
+  function addParty(role: IntakeFormData["stepTwo"]["parties"][number]["role"]) {
+    const mode = role === "adverse_insurer" ? "organization" : "contact";
     setData((current) => ({
       ...current,
       stepTwo: {
@@ -366,7 +388,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
             firstName: "",
             lastName: "",
             organizationName: "",
-            role: mode === "organization" ? "responsible_party" : "insured",
+            role,
             isPrimary: current.stepTwo.parties.length === 0,
             notes: "",
           },
@@ -413,7 +435,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
             ...current.stepTwo.evidence,
             {
               evidenceType: trimmed,
-              status: "requested",
+              status: "missing",
               notes: "",
             },
           ],
@@ -481,6 +503,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                     selectedAdjuster={assignedAdjuster}
                     selectedCarrier={selectedCarrier}
                     supervisors={supervisors}
+                    onCarrierContactAdded={(contact) => setAddedCarrierContacts((current) => mergeCarrierContacts([contact], current))}
                     update={updateStepOne}
                   />
                 ) : null}
@@ -500,8 +523,10 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                 ) : null}
                 {step === 3 ? (
                   <ReviewRouteStep
+                    carrierContacts={carrierContacts}
                     data={data}
                     errors={fieldErrors}
+                    issueGroups={issueGroups}
                     options={options}
                     unresolvedIssues={hasInteracted ? unresolvedIssues : []}
                     update={updateStepThree}
@@ -511,7 +536,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
             </CardContent>
           </Card>
 
-          <div className="flex flex-col-reverse gap-3 rounded-lg border border-border bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="sticky bottom-0 z-20 flex flex-col-reverse gap-3 rounded-lg border border-border bg-card/95 p-4 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
               <Button asChild type="button" variant="outline">
                 <Link href="/matters">Back to matters</Link>
@@ -562,7 +587,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                   Continue
                 </Button>
               ) : (
-                <Button disabled={isPending || !options.permission.canCreateMatter} type="button" onClick={completeIntake}>
+                <Button disabled={isPending || !options.permission.canCreateMatter || issueGroups.required.length > 0} type="button" onClick={completeIntake}>
                   Complete Intake
                 </Button>
               )}
@@ -638,18 +663,28 @@ function MatterDetailsStep(props: {
   selectedAdjuster?: IntakeCarrierContact;
   adjusters: IntakeCarrierContact[];
   supervisors: IntakeCarrierContact[];
+  onCarrierContactAdded: (contact: IntakeCarrierContact) => void;
   update: <K extends keyof IntakeFormData["stepOne"]>(key: K, value: IntakeFormData["stepOne"][K]) => void;
 }) {
-  const { data, errors, options, selectedAdjuster, adjusters, supervisors, update } = props;
+  const { data, errors, options, selectedAdjuster, adjusters, supervisors, onCarrierContactAdded, update } = props;
   const attorneys = options.users.filter((user) => ["admin", "partner", "attorney"].includes(user.role));
   const staff = options.users.filter((user) => user.role === "staff");
   const responsibleUsers = options.users.filter((user) => ["admin", "partner", "attorney", "staff"].includes(user.role));
   const assignedAttorneyIds = normalizeIdList([...(data.stepOne.assignedAttorneyIds ?? []), data.stepOne.assignedAttorneyId]);
   const assignedStaffIds = normalizeIdList([...(data.stepOne.assignedStaffIds ?? []), data.stepOne.assignedStaffId]);
+  const leadAttorneyId = data.stepOne.assignedAttorneyId || assignedAttorneyIds[0] || "";
+  const additionalAttorneyIds = assignedAttorneyIds.filter((id) => id !== leadAttorneyId);
 
-  function updateAttorneyIds(nextIds: string[]) {
+  function updateLeadAttorneyId(nextId: string) {
+    const nextIds = normalizeIdList([nextId, ...additionalAttorneyIds]);
     update("assignedAttorneyIds", nextIds);
-    update("assignedAttorneyId", nextIds[0] ?? "");
+    update("assignedAttorneyId", nextId);
+  }
+
+  function updateAdditionalAttorneyIds(nextIds: string[]) {
+    const combinedIds = normalizeIdList([leadAttorneyId, ...nextIds]);
+    update("assignedAttorneyIds", combinedIds);
+    update("assignedAttorneyId", leadAttorneyId || combinedIds[0] || "");
   }
 
   function updateStaffIds(nextIds: string[]) {
@@ -678,9 +713,6 @@ function MatterDetailsStep(props: {
           <Field error={errors.carrierClaimNumber} required label="Carrier claim number">
             <Input className={inputClass(errors.carrierClaimNumber)} value={data.stepOne.carrierClaimNumber} onChange={(event) => update("carrierClaimNumber", event.target.value)} />
           </Field>
-          <Field label="Firm matter number">
-            <Input className={inputClass()} value={data.stepOne.firmMatterNumber ?? ""} onChange={(event) => update("firmMatterNumber", event.target.value)} />
-          </Field>
           <Field error={errors.matterName} required label="Matter name">
             <Input className={inputClass(errors.matterName)} value={data.stepOne.matterName} onChange={(event) => update("matterName", event.target.value)} />
           </Field>
@@ -696,6 +728,25 @@ function MatterDetailsStep(props: {
           <Field error={errors.dateReferred} required label="Date referred">
             <Input className={inputClass(errors.dateReferred)} type="date" value={data.stepOne.dateReferred} onChange={(event) => update("dateReferred", event.target.value)} />
           </Field>
+          <Field error={errors.assignedAttorneyIds ?? errors.assignedAttorneyId} required label="Lead attorney">
+            <select className={selectClass(errors.assignedAttorneyIds ?? errors.assignedAttorneyId)} value={leadAttorneyId} onChange={(event) => updateLeadAttorneyId(event.target.value)}>
+              <option value="">Select lead attorney</option>
+              {attorneys.map((user) => (
+                <option key={user.id} value={user.id}>{user.fullName} {user.jobTitle ? `- ${user.jobTitle}` : ""}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </section>
+
+      {responsibleUsers.length === 0 ? <EmptyState description="No eligible active users are available for assignment." title="No eligible assignees" /> : null}
+
+      <details className="rounded-lg border border-border bg-background p-4">
+        <summary className="cursor-pointer text-base font-semibold text-foreground">Optional details</summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Firm matter number">
+            <Input className={inputClass()} value={data.stepOne.firmMatterNumber ?? ""} onChange={(event) => update("firmMatterNumber", event.target.value)} />
+          </Field>
           <Field label="Date of loss">
             <Input className={inputClass()} type="date" value={data.stepOne.dateOfLoss ?? ""} onChange={(event) => update("dateOfLoss", event.target.value)} />
           </Field>
@@ -705,27 +756,32 @@ function MatterDetailsStep(props: {
           <Field label="Venue">
             <Input className={inputClass()} value={data.stepOne.venue ?? ""} onChange={(event) => update("venue", event.target.value)} />
           </Field>
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-lg font-semibold text-foreground">Carrier Assignment</h3>
-          <AddCarrierContactDialog disabled={!data.stepOne.carrierId || !options.permission.canAddCarrierContact} carrierId={data.stepOne.carrierId} />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
           <Field
             help={data.stepOne.carrierId && adjusters.length === 0 ? "No active adjusters are listed for this carrier. Add a carrier contact or continue without one." : undefined}
             label="Assigned adjuster"
           >
-            <select className={selectClass()} value={data.stepOne.assignedAdjusterId ?? ""} onChange={(event) => update("assignedAdjusterId", event.target.value)}>
-              <option value="">Select adjuster</option>
-              {adjusters.map((contact) => (
-                <option key={contact.id} value={contact.id}>
-                  {contact.fullName} {contact.jobTitle ? `- ${contact.jobTitle}` : ""}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <select className={cn(selectClass(), "sm:flex-1")} value={data.stepOne.assignedAdjusterId ?? ""} onChange={(event) => update("assignedAdjusterId", event.target.value)}>
+                <option value="">Select adjuster</option>
+                {adjusters.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.fullName} {contact.jobTitle ? `- ${contact.jobTitle}` : ""}
+                  </option>
+                ))}
+              </select>
+              <AddCarrierContactDialog
+                buttonLabel="Add Adjuster"
+                buttonClassName="h-10 shrink-0 gap-2"
+                carrierId={data.stepOne.carrierId}
+                defaultContactType="adjuster"
+                disabled={!data.stepOne.carrierId || !options.permission.canAddCarrierContact}
+                lockedContactType
+                onContactAdded={(contact) => {
+                  onCarrierContactAdded(contact);
+                  update("assignedAdjusterId", contact.id);
+                }}
+              />
+            </div>
           </Field>
           <Field label="Carrier supervisor">
             <select className={selectClass()} value={data.stepOne.carrierSupervisorId ?? ""} onChange={(event) => update("carrierSupervisorId", event.target.value)}>
@@ -737,46 +793,37 @@ function MatterDetailsStep(props: {
               ))}
             </select>
           </Field>
-        </div>
-        {selectedAdjuster ? (
-          <div className="rounded-lg border border-border bg-background p-4 text-sm">
-            <p className="font-medium text-foreground">{selectedAdjuster.fullName}</p>
-            <p className="mt-1 text-muted-foreground">
-              {[selectedAdjuster.jobTitle, selectedAdjuster.department, selectedAdjuster.email, selectedAdjuster.phone]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-foreground">Firm Assignment</h3>
-        {responsibleUsers.length === 0 ? <EmptyState description="No eligible active users are available for assignment." title="No eligible assignees" /> : null}
-        <div className="grid gap-4 md:grid-cols-2">
-          <UserCheckboxGroup
-            emptyLabel="No attorneys are available."
-            error={errors.assignedAttorneyIds ?? errors.assignedAttorneyId}
-            label="Assigned attorneys"
-            required
-            selectedIds={assignedAttorneyIds}
-            users={attorneys}
-            onChange={updateAttorneyIds}
+          <UserMultiSelect
+            emptyLabel="No additional attorneys are available."
+            label="Additional attorneys"
+            selectedIds={additionalAttorneyIds}
+            users={attorneys.filter((user) => user.id !== leadAttorneyId)}
+            onChange={updateAdditionalAttorneyIds}
           />
-          <UserCheckboxGroup
+          <UserMultiSelect
             emptyLabel="No staff users are available."
-            label="Assigned staff members"
+            label="Additional staff"
             selectedIds={assignedStaffIds}
             users={staff}
             onChange={updateStaffIds}
           />
+          {selectedAdjuster ? (
+            <div className="rounded-lg border border-border bg-card p-4 text-sm md:col-span-2">
+              <p className="font-medium text-foreground">{selectedAdjuster.fullName}</p>
+              <p className="mt-1 text-muted-foreground">
+                {[selectedAdjuster.jobTitle, selectedAdjuster.department, selectedAdjuster.email, selectedAdjuster.phone]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+          ) : null}
         </div>
-      </section>
+      </details>
     </div>
   );
 }
 
-function UserCheckboxGroup({
+function UserMultiSelect({
   emptyLabel,
   error,
   label,
@@ -793,6 +840,18 @@ function UserCheckboxGroup({
   selectedIds: string[];
   users: IntakeUser[];
 }) {
+  const selectedUsers = selectedIds
+    .map((id) => users.find((user) => user.id === id))
+    .filter((user): user is IntakeUser => Boolean(user));
+  const buttonLabel =
+    users.length === 0
+      ? emptyLabel
+      : selectedUsers.length === 0
+        ? `Select ${label.toLowerCase()}`
+        : selectedUsers.length === 1
+          ? selectedUsers[0].fullName
+          : `${selectedUsers.length} selected`;
+
   return (
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium text-foreground">
@@ -803,58 +862,91 @@ function UserCheckboxGroup({
           </span>
         ) : null}
       </legend>
-      <div
-        className={cn(
-          "max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-2 shadow-sm focus-within:ring-3 focus-within:ring-ring/25",
-          error && "border-[color:var(--urgent)]"
-        )}
-      >
-        {users.length === 0 ? (
-          <p className="px-2 py-3 text-sm text-muted-foreground">{emptyLabel}</p>
-        ) : (
-          <div className="grid gap-1">
-            {users.map((user) => {
-              const checked = selectedIds.includes(user.id);
-              return (
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted",
-                    checked && "bg-secondary text-foreground"
-                  )}
-                  key={user.id}
-                >
-                  <input
-                    checked={checked}
-                    className="size-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    type="checkbox"
-                    onChange={(event) => {
-                      const nextIds = event.target.checked
-                        ? normalizeIdList([...selectedIds, user.id])
-                        : selectedIds.filter((id) => id !== user.id);
-                      onChange(nextIds);
-                    }}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{user.fullName}</span>
-                    {user.jobTitle ? <span className="block truncate text-xs text-muted-foreground">{user.jobTitle}</span> : null}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-invalid={Boolean(error)}
+            className={cn(
+              "h-auto min-h-10 w-full justify-between gap-2 rounded-lg border-border bg-card px-3 py-2 text-left font-normal shadow-sm",
+              error && "border-[color:var(--urgent)]"
+            )}
+            disabled={users.length === 0}
+            type="button"
+            variant="outline"
+          >
+            <span className={cn("min-w-0 flex-1 truncate", selectedUsers.length === 0 && "text-muted-foreground")}>{buttonLabel}</span>
+            <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="max-h-72 w-(--radix-dropdown-menu-trigger-width)">
+          <DropdownMenuLabel>{label}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {users.map((user) => {
+            const checked = selectedIds.includes(user.id);
+            return (
+              <DropdownMenuCheckboxItem
+                checked={checked}
+                className="items-start gap-2 py-2"
+                key={user.id}
+                onCheckedChange={(nextChecked) => {
+                  const nextIds = nextChecked
+                    ? normalizeIdList([...selectedIds, user.id])
+                    : selectedIds.filter((id) => id !== user.id);
+                  onChange(nextIds);
+                }}
+                onSelect={(event) => event.preventDefault()}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{user.fullName}</span>
+                  {user.jobTitle ? <span className="block truncate text-xs text-muted-foreground">{user.jobTitle}</span> : null}
+                </span>
+              </DropdownMenuCheckboxItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {error ? <p className="text-sm text-[var(--urgent)]">{error}</p> : null}
       {selectedIds.length > 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Primary: {users.find((user) => user.id === selectedIds[0])?.fullName ?? "First selected user"}
-        </p>
+        <div className="flex flex-wrap gap-2">
+          {selectedUsers.map((user) => (
+            <span className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-md bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground" key={user.id}>
+              <span className="truncate">{user.fullName}</span>
+              <button
+                aria-label={`Remove ${user.fullName}`}
+                className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                type="button"
+                onClick={() => onChange(selectedIds.filter((id) => id !== user.id))}
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            </span>
+          ))}
+          <p className="basis-full text-sm text-muted-foreground">
+            Primary: {users.find((user) => user.id === selectedIds[0])?.fullName ?? "First selected user"}
+          </p>
+        </div>
       ) : null}
     </fieldset>
   );
 }
 
-function AddCarrierContactDialog({ carrierId, disabled }: { carrierId: string; disabled: boolean }) {
+function AddCarrierContactDialog({
+  buttonClassName,
+  buttonLabel = "Add New Carrier Contact",
+  carrierId,
+  defaultContactType = "adjuster",
+  disabled,
+  lockedContactType,
+  onContactAdded,
+}: {
+  buttonClassName?: string;
+  buttonLabel?: string;
+  carrierId: string;
+  defaultContactType?: IntakeCarrierContact["contactType"];
+  disabled: boolean;
+  lockedContactType?: boolean;
+  onContactAdded?: (contact: IntakeCarrierContact) => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
@@ -864,14 +956,14 @@ function AddCarrierContactDialog({ carrierId, disabled }: { carrierId: string; d
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2" disabled={disabled} type="button" variant="outline">
+        <Button className={cn("gap-2", buttonClassName)} disabled={disabled} type="button" variant="outline">
           <PlusCircle aria-hidden="true" className="size-4" />
-          Add New Carrier Contact
+          {buttonLabel}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add carrier contact</DialogTitle>
+          <DialogTitle>{lockedContactType ? "Add adjuster" : "Add carrier contact"}</DialogTitle>
           <DialogDescription>Create a focused contact record for this carrier without leaving intake.</DialogDescription>
         </DialogHeader>
         <form
@@ -879,20 +971,38 @@ function AddCarrierContactDialog({ carrierId, disabled }: { carrierId: string; d
           onSubmit={(event) => {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
+            const email = String(form.get("email") ?? "");
+            const phone = String(form.get("phone") ?? "");
+            const jobTitle = String(form.get("jobTitle") ?? "");
+            const department = String(form.get("department") ?? "");
+            const contactType = String(form.get("contactType") ?? defaultContactType) as IntakeCarrierContact["contactType"];
+            const supervisorContactId = String(form.get("supervisorContactId") ?? "");
             startTransition(async () => {
               const result = await addCarrierContactAction({
                 carrierId,
                 fullName,
-                email: String(form.get("email") ?? ""),
-                phone: String(form.get("phone") ?? ""),
-                jobTitle: String(form.get("jobTitle") ?? ""),
-                department: String(form.get("department") ?? ""),
-                contactType: String(form.get("contactType") ?? "adjuster"),
-                supervisorContactId: String(form.get("supervisorContactId") ?? ""),
+                email,
+                phone,
+                jobTitle,
+                department,
+                contactType,
+                supervisorContactId,
               });
               setMessage(result.ok ? "Contact saved. The intake options have been refreshed." : result.message);
               if (result.ok) {
+                onContactAdded?.({
+                  id: result.contactId,
+                  carrierId,
+                  fullName,
+                  email: email || null,
+                  phone: phone || null,
+                  jobTitle: jobTitle || null,
+                  department: department || null,
+                  contactType,
+                  supervisorContactId: supervisorContactId || null,
+                });
                 setFullName("");
+                setOpen(false);
                 router.refresh();
               }
             });
@@ -907,15 +1017,19 @@ function AddCarrierContactDialog({ carrierId, disabled }: { carrierId: string; d
             <Field label="Job title"><Input name="jobTitle" /></Field>
             <Field label="Department"><Input name="department" /></Field>
           </div>
-          <Field label="Contact type">
-            <select className={selectClass()} name="contactType" defaultValue="adjuster">
-              <option value="adjuster">Adjuster</option>
-              <option value="supervisor">Supervisor</option>
-              <option value="claims_manager">Claims manager</option>
-              <option value="billing_contact">Billing contact</option>
-              <option value="other">Other</option>
-            </select>
-          </Field>
+          {lockedContactType ? (
+            <input name="contactType" type="hidden" value={defaultContactType} />
+          ) : (
+            <Field label="Contact type">
+              <select className={selectClass()} name="contactType" defaultValue={defaultContactType}>
+                <option value="adjuster">Adjuster</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="claims_manager">Claims manager</option>
+                <option value="billing_contact">Billing contact</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
+          )}
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>Close</Button>
@@ -937,14 +1051,23 @@ function RecoveryDetailsStep(props: {
   updateStepTwo: <K extends keyof IntakeFormData["stepTwo"]>(key: K, value: IntakeFormData["stepTwo"][K]) => void;
   updateParty: (index: number, key: string, value: string | boolean) => void;
   updateEvidence: (index: number, key: string, value: string) => void;
-  onAddParty: (mode: "contact" | "organization") => void;
+  onAddParty: (role: IntakeFormData["stepTwo"]["parties"][number]["role"]) => void;
 }) {
   const { data, options, suggestedAmount, addEvidence, removeEvidence, updateStepTwo, updateParty, updateEvidence, onAddParty } = props;
   const showCoverage = data.stepTwo.insuranceStatus === "confirmed_coverage" || data.stepTwo.insuranceStatus === "identified_unconfirmed";
+  const [evidenceSearch, setEvidenceSearch] = useState("");
   const [selectedEvidenceType, setSelectedEvidenceType] = useState("");
   const [customEvidenceType, setCustomEvidenceType] = useState("");
   const selectedEvidenceTypes = new Set(data.stepTwo.evidence.map((item) => item.evidenceType));
   const availableEvidenceOptions = evidenceTypeOptions.filter((option) => !selectedEvidenceTypes.has(option.value));
+  const filteredEvidenceOptions = availableEvidenceOptions.filter((option) => option.label.toLowerCase().includes(evidenceSearch.toLowerCase()));
+  const recommendedEvidence = recommendedEvidenceByMatterType[data.stepOne.matterType] ?? [];
+  const availableRecommendedEvidence = recommendedEvidence.filter((type) => !selectedEvidenceTypes.has(type));
+  const suggestedAmountLabel = suggestedAmount
+    ? Number(suggestedAmount) === 0
+      ? "Confirmed zero based on entered amounts"
+      : `$${suggestedAmount}`
+    : "No financial information entered";
 
   return (
     <div className="space-y-8">
@@ -963,6 +1086,7 @@ function RecoveryDetailsStep(props: {
               <Input
                 inputMode="decimal"
                 min="0"
+                placeholder="Unknown"
                 step="0.01"
                 type="number"
                 value={String(data.stepTwo[key as keyof IntakeFormData["stepTwo"]] ?? "")}
@@ -973,12 +1097,13 @@ function RecoveryDetailsStep(props: {
           ))}
         </div>
         <div className="rounded-lg border border-border bg-background p-4 text-sm">
-          Suggested amount sought: <span className="font-semibold text-foreground">${suggestedAmount}</span>
+          Suggested amount sought: <span className="font-semibold text-foreground">{suggestedAmountLabel}</span>
           {data.stepTwo.amountSoughtManuallyChanged ? (
             <span className="ml-2 text-muted-foreground">Manually adjusted</span>
           ) : null}
           <Button
             className="ml-0 mt-3 sm:ml-3 sm:mt-0"
+            disabled={!suggestedAmount}
             type="button"
             variant="outline"
             onClick={() => {
@@ -1028,9 +1153,11 @@ function RecoveryDetailsStep(props: {
             <h3 className="text-lg font-semibold text-foreground">Matter Parties</h3>
             <p className="mt-1 text-sm text-muted-foreground">Identify the insured and responsible party when available.</p>
           </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={() => onAddParty("contact")}>Add contact party</Button>
-            <Button type="button" variant="outline" onClick={() => onAddParty("organization")}>Add organization party</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => onAddParty("insured")}>Add Insured</Button>
+            <Button type="button" variant="outline" onClick={() => onAddParty("responsible_party")}>Add Responsible Party</Button>
+            <Button type="button" variant="outline" onClick={() => onAddParty("adverse_insurer")}>Add Adverse Insurer</Button>
+            <Button type="button" variant="outline" onClick={() => onAddParty("other")}>Add Other Party</Button>
           </div>
         </div>
         {data.stepTwo.parties.length === 0 ? (
@@ -1043,6 +1170,12 @@ function RecoveryDetailsStep(props: {
                   <Field label="Role">
                     <select className={selectClass()} value={party.role} onChange={(event) => updateParty(index, "role", event.target.value)}>
                       {partyRoleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Party type">
+                    <select className={selectClass()} value={party.mode} onChange={(event) => updateParty(index, "mode", event.target.value)}>
+                      <option value="contact">Person/contact</option>
+                      <option value="organization">Organization</option>
                     </select>
                   </Field>
                   {party.mode === "contact" ? (
@@ -1090,6 +1223,14 @@ function RecoveryDetailsStep(props: {
             <p className="mt-1 text-sm text-muted-foreground">Add only the evidence items that matter for this recovery.</p>
           </div>
           <div className="grid gap-2 sm:min-w-[360px] sm:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="sr-only" htmlFor="evidence-search">Search evidence</label>
+            <Input
+              className="sm:col-span-2"
+              id="evidence-search"
+              placeholder="Search evidence"
+              value={evidenceSearch}
+              onChange={(event) => setEvidenceSearch(event.target.value)}
+            />
             <label className="sr-only" htmlFor="evidence-type-picker">Evidence item</label>
             <select
               className={selectClass()}
@@ -1098,7 +1239,7 @@ function RecoveryDetailsStep(props: {
               onChange={(event) => setSelectedEvidenceType(event.target.value)}
             >
               <option value="">Choose evidence to add</option>
-              {availableEvidenceOptions.map((option) => (
+              {filteredEvidenceOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -1133,6 +1274,41 @@ function RecoveryDetailsStep(props: {
             </Button>
           </div>
         </div>
+        {recommendedEvidence.length > 0 ? (
+          <div className="rounded-lg border border-border bg-background p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Recommended for {matterTypeOptions.find((option) => option.value === data.stepOne.matterType)?.label}</p>
+                <p className="mt-1 text-sm text-muted-foreground">Add the items that apply to this matter.</p>
+              </div>
+              <Button
+                disabled={availableRecommendedEvidence.length === 0}
+                type="button"
+                variant="outline"
+                onClick={() => availableRecommendedEvidence.forEach(addEvidence)}
+              >
+                Add all recommended
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {recommendedEvidence.map((type) => {
+                const selected = selectedEvidenceTypes.has(type);
+                return (
+                  <Button
+                    disabled={selected}
+                    key={type}
+                    size="sm"
+                    type="button"
+                    variant={selected ? "secondary" : "outline"}
+                    onClick={() => addEvidence(type)}
+                  >
+                    {selected ? "Added" : "Add"} {formatEvidenceType(type)}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {data.stepTwo.evidence.length === 0 ? (
           <EmptyState description="Choose standard evidence items or add a custom item when this matter needs one." title="No evidence items selected" />
         ) : (
@@ -1218,14 +1394,27 @@ function MatterSpecificQuestions({
 }
 
 function ReviewRouteStep(props: {
+  carrierContacts: IntakeCarrierContact[];
   data: IntakeFormData;
   errors: Record<string, string>;
+  issueGroups: { required: string[]; followUp: string[] };
   options: IntakeOptions;
   unresolvedIssues: string[];
   update: <K extends keyof IntakeFormData["stepThree"]>(key: K, value: IntakeFormData["stepThree"][K]) => void;
 }) {
-  const { data, errors, options, unresolvedIssues, update } = props;
+  const { carrierContacts, data, errors, issueGroups, options, update } = props;
   const canVerify = options.permission.canVerifyDeadline;
+  const deadlineMode = data.stepThree.statuteDeadlineUnknownAcknowledged
+    ? "unknown"
+    : data.stepThree.verifyStatuteDeadline
+      ? "verified"
+      : "pending";
+
+  function updateDeadlineMode(mode: "pending" | "unknown" | "verified") {
+    update("statuteDeadlineUnknownAcknowledged", mode === "unknown");
+    update("verifyStatuteDeadline", mode === "verified");
+    if (mode === "unknown") update("statuteDeadline", "");
+  }
 
   return (
     <div className="space-y-8">
@@ -1245,12 +1434,16 @@ function ReviewRouteStep(props: {
         </div>
         <div className="grid gap-3 rounded-lg border border-border bg-background p-4">
           <label className="flex items-start gap-2 text-sm text-foreground">
-            <input checked={data.stepThree.statuteDeadlineUnknownAcknowledged} type="checkbox" onChange={(event) => update("statuteDeadlineUnknownAcknowledged", event.target.checked)} />
-            The statute deadline is not yet known and requires immediate review.
+            <input checked={deadlineMode === "pending"} name="deadlineStatus" type="radio" onChange={() => updateDeadlineMode("pending")} />
+            Deadline entered; attorney verification pending.
+          </label>
+          <label className="flex items-start gap-2 text-sm text-foreground">
+            <input checked={deadlineMode === "unknown"} name="deadlineStatus" type="radio" onChange={() => updateDeadlineMode("unknown")} />
+            Deadline unknown; immediate review required.
           </label>
           <label className={cn("flex items-start gap-2 text-sm", canVerify ? "text-foreground" : "text-muted-foreground")}>
-            <input checked={data.stepThree.verifyStatuteDeadline} disabled={!canVerify} type="checkbox" onChange={(event) => update("verifyStatuteDeadline", event.target.checked)} />
-            Mark statute deadline as attorney verified.
+            <input checked={deadlineMode === "verified"} disabled={!canVerify} name="deadlineStatus" type="radio" onChange={() => updateDeadlineMode("verified")} />
+            Deadline attorney verified.
           </label>
           {!canVerify ? <p className="text-sm text-muted-foreground">Staff may enter proposed dates but cannot mark legal deadlines as attorney verified.</p> : null}
         </div>
@@ -1291,16 +1484,32 @@ function ReviewRouteStep(props: {
 
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-foreground">Review Summary</h3>
-        {unresolvedIssues.length > 0 ? (
-          <div className="rounded-lg border border-[color:var(--warning)]/20 bg-[var(--warning-muted)] p-4">
-            <p className="text-sm font-semibold text-[var(--warning)]">Unresolved issues</p>
-            <ul className="mt-2 space-y-1 text-sm text-[var(--warning)]">
-              {unresolvedIssues.map((issue) => <li key={issue}>{issue}</li>)}
-            </ul>
+        <div className="rounded-lg border border-border bg-background p-4">
+          <p className="text-sm font-semibold text-foreground">
+            {issueGroups.required.length} required {issueGroups.required.length === 1 ? "item" : "items"} · {issueGroups.followUp.length} follow-up {issueGroups.followUp.length === 1 ? "item" : "items"}
+          </p>
+          <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <IssueList title="Required before completion" issues={issueGroups.required} urgent />
+            <IssueList title="Follow up after intake" issues={issueGroups.followUp} />
           </div>
-        ) : null}
-        <ReviewSummary data={data} options={options} />
+        </div>
+        <ReviewSummary carrierContacts={carrierContacts} data={data} options={options} />
       </section>
+    </div>
+  );
+}
+
+function IssueList({ issues, title, urgent }: { issues: string[]; title: string; urgent?: boolean }) {
+  return (
+    <div>
+      <p className={cn("text-sm font-medium", urgent && issues.length > 0 ? "text-[var(--urgent)]" : "text-foreground")}>{title}</p>
+      {issues.length > 0 ? (
+        <ul className={cn("mt-2 space-y-1 text-sm", urgent ? "text-[var(--urgent)]" : "text-muted-foreground")}>
+          {issues.map((issue) => <li key={issue}>{issue}</li>)}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">None.</p>
+      )}
     </div>
   );
 }
@@ -1351,7 +1560,7 @@ function IntakeSummary(props: {
         <div><dt className="text-muted-foreground">Adjuster</dt><dd className="font-medium text-foreground">{selectedAdjuster?.fullName ?? "Not assigned"}</dd></div>
         <div><dt className="text-muted-foreground">Attorneys</dt><dd className="font-medium text-foreground">{attorneyLabel}</dd></div>
         <div><dt className="text-muted-foreground">Staff</dt><dd className="font-medium text-foreground">{staffLabel}</dd></div>
-        <div><dt className="text-muted-foreground">Amount sought</dt><dd className="font-medium text-foreground"><CurrencyDisplay value={Number(data.stepTwo.amountSought || 0)} /></dd></div>
+        <div><dt className="text-muted-foreground">Amount sought</dt><dd className="font-medium text-foreground">{formatIntakeCurrency(data.stepTwo.amountSought)}</dd></div>
         <div><dt className="text-muted-foreground">Next action</dt><dd className="font-medium text-foreground">{data.stepThree.nextAction}</dd></div>
         {data.stepThree.nextActionDueDate ? <div><dt className="text-muted-foreground">Next-action due</dt><dd className="font-medium text-foreground"><DateDisplay value={data.stepThree.nextActionDueDate} /></dd></div> : null}
       </dl>
@@ -1385,9 +1594,9 @@ function IntakeSummary(props: {
   );
 }
 
-function ReviewSummary({ data, options }: { data: IntakeFormData; options: IntakeOptions }) {
+function ReviewSummary({ carrierContacts, data, options }: { carrierContacts: IntakeCarrierContact[]; data: IntakeFormData; options: IntakeOptions }) {
   const carrier = options.carriers.find((item) => item.id === data.stepOne.carrierId);
-  const adjuster = options.carrierContacts.find((item) => item.id === data.stepOne.assignedAdjusterId);
+  const adjuster = carrierContacts.find((item) => item.id === data.stepOne.assignedAdjusterId);
   const attorneyLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedAttorneyIds ?? []), data.stepOne.assignedAttorneyId]));
   const staffLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedStaffIds ?? []), data.stepOne.assignedStaffId]));
   const received = data.stepTwo.evidence.filter((item) => item.status === "received");
@@ -1402,8 +1611,8 @@ function ReviewSummary({ data, options }: { data: IntakeFormData; options: Intak
       <p><span className="text-muted-foreground">Attorneys:</span> {attorneyLabel}</p>
       <p><span className="text-muted-foreground">Staff:</span> {staffLabel}</p>
       <p><span className="text-muted-foreground">Matter type:</span> {formatEvidenceType(data.stepOne.matterType)}</p>
-      <p><span className="text-muted-foreground">Amount paid:</span> ${data.stepTwo.amountPaid}</p>
-      <p><span className="text-muted-foreground">Amount sought:</span> ${data.stepTwo.amountSought}</p>
+      <p><span className="text-muted-foreground">Amount paid:</span> {formatIntakeCurrency(data.stepTwo.amountPaid)}</p>
+      <p><span className="text-muted-foreground">Amount sought:</span> {formatIntakeCurrency(data.stepTwo.amountSought)}</p>
       <p><span className="text-muted-foreground">Insurance:</span> {data.stepTwo.insuranceStatus.replaceAll("_", " ")}</p>
       <p><span className="text-muted-foreground">Liability:</span> {data.stepTwo.liabilityAssessment}</p>
       <p><span className="text-muted-foreground">Collectability:</span> {data.stepTwo.collectabilityAssessment}</p>
@@ -1416,17 +1625,11 @@ function ReviewSummary({ data, options }: { data: IntakeFormData; options: Intak
   );
 }
 
-function getUnresolvedIssues(data: IntakeFormData) {
-  const issues: string[] = [];
-  if (!data.stepOne.assignedAdjusterId) issues.push("No assigned adjuster.");
-  if (!data.stepTwo.parties.some((party) => party.role === "responsible_party")) issues.push("Missing responsible party.");
-  if (data.stepTwo.insuranceStatus === "unknown") issues.push("Insurance status is unknown.");
-  if (!data.stepThree.statuteDeadline) issues.push("No statute deadline entered.");
-  if (data.stepThree.statuteDeadline && !data.stepThree.verifyStatuteDeadline) issues.push("Statute deadline is unverified.");
-  if (!data.stepThree.nextAction) issues.push("No next action selected.");
-  if (!data.stepThree.nextActionDueDate) issues.push("Missing next-action due date.");
-  if (!data.stepTwo.evidence.some((item) => item.evidenceType === "payment_ledger" && item.status === "received")) issues.push("Payment documentation is not marked received.");
-  return issues;
+function formatIntakeCurrency(value: string) {
+  if (value.trim() === "") return "Unknown";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "Unknown";
+  return <CurrencyDisplay value={parsed} />;
 }
 
 function flattenStepErrors(error: { flatten: () => { fieldErrors: Record<string, string[]> } }) {

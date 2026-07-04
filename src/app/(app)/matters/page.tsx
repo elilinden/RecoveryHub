@@ -76,9 +76,9 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
               {result.items.map((matter) => {
                 const href = matter.intakeStatus === "complete" ? `/matters/${matter.id}` : `/matters/${matter.id}/intake`;
                 return (
-                  <TableRow className="group h-14 cursor-pointer transition-colors hover:bg-muted focus-within:bg-muted" key={matter.id}>
+                  <TableRow className="group h-14 cursor-pointer transition-colors hover:bg-[var(--info-muted)] focus-within:bg-[var(--info-muted)]" key={matter.id}>
                     <TableCell className="sticky left-0 z-10 w-[12rem] min-w-[12rem] bg-card px-3 py-2 group-hover:bg-muted">
-                      <Link className="block truncate font-medium text-foreground hover:underline" href={href} title={matter.matterName}>
+                      <Link className="line-clamp-2 rounded-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={href} title={matter.matterName}>
                         {matter.matterName}
                       </Link>
                       <p className="mt-1 truncate text-xs text-muted-foreground" title={matter.carrierClaimNumber ?? "No claim number"}>
@@ -103,7 +103,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                       <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} />
                     </TableCell>
                     <TableCell className="w-[10rem] min-w-[10rem] px-3 py-2 text-muted-foreground">
-                      <span className="block truncate" title={matter.nextAction ?? "Not assigned"}>
+                      <span className="line-clamp-2 whitespace-normal" title={matter.nextAction ?? "Not assigned"}>
                         {matter.nextAction ?? "Not assigned"}
                       </span>
                     </TableCell>
@@ -125,49 +125,41 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
             ))}
           </div>
 
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <p>
-              Showing {result.rangeStart}-{result.rangeEnd} of {result.totalCount} matters
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="sr-only" htmlFor="page-size-links">Rows per page</label>
-              <div className="flex items-center gap-1" id="page-size-links" aria-label="Rows per page">
-                {[25, 50, 100].map((size) => (
-                  <Button asChild key={size} size="sm" variant={result.query.pageSize === size ? "secondary" : "outline"}>
-                    <Link href={`/matters?${createMattersQueryString(result.query, { pageSize: size, page: 1 })}`}>
-                    {size} rows
-                    </Link>
-                  </Button>
-                ))}
-              </div>
-              {result.query.page <= 1 ? (
-                <Button disabled size="sm" variant="outline">
-                  <ChevronLeft aria-hidden="true" className="size-4" />
-                  Previous
-                </Button>
-              ) : (
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/matters?${createMattersQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}>
+          {result.totalCount > result.query.pageSize ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <p>
+                Showing {result.rangeStart}-{result.rangeEnd} of {result.totalCount} matters
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {result.query.page <= 1 ? (
+                  <Button disabled size="sm" variant="outline">
                     <ChevronLeft aria-hidden="true" className="size-4" />
                     Previous
-                  </Link>
-                </Button>
-              )}
-              {result.rangeEnd >= result.totalCount ? (
-                <Button disabled size="sm" variant="outline">
-                  Next
-                  <ChevronRight aria-hidden="true" className="size-4" />
-                </Button>
-              ) : (
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/matters?${createMattersQueryString(result.query, { page: result.query.page + 1 })}`}>
+                  </Button>
+                ) : (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/matters?${createMattersQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}>
+                      <ChevronLeft aria-hidden="true" className="size-4" />
+                      Previous
+                    </Link>
+                  </Button>
+                )}
+                {result.rangeEnd >= result.totalCount ? (
+                  <Button disabled size="sm" variant="outline">
                     Next
                     <ChevronRight aria-hidden="true" className="size-4" />
-                  </Link>
-                </Button>
-              )}
+                  </Button>
+                ) : (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/matters?${createMattersQueryString(result.query, { page: result.query.page + 1 })}`}>
+                      Next
+                      <ChevronRight aria-hidden="true" className="size-4" />
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          ) : null}
         </>
       ) : (
         <EmptyState

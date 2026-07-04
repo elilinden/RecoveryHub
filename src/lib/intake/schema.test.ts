@@ -4,7 +4,9 @@ import { filterContactsByCarrier, type IntakeCarrierContact } from "./types";
 import {
   calculateSuggestedAmountSought,
   createEmptyIntake,
+  getIntakeIssueGroups,
   intakeSchema,
+  recommendedEvidenceByMatterType,
   validateIntakeStep,
 } from "./schema";
 
@@ -17,6 +19,39 @@ describe("intake schema", () => {
         recoverableExpenses: "42.10",
       })
     ).toBe("1792.35");
+  });
+
+  it("distinguishes missing financial values from confirmed zero values", () => {
+    expect(calculateSuggestedAmountSought({ amountPaid: "", deductible: "", recoverableExpenses: "" })).toBe("");
+    expect(calculateSuggestedAmountSought({ amountPaid: "0", deductible: "0.00", recoverableExpenses: "0" })).toBe("0.00");
+  });
+
+  it("separates intake blockers from follow-up issues", () => {
+    const intake = createEmptyIntake();
+    const initial = getIntakeIssueGroups(intake);
+    expect(initial.required).toContain("Missing carrier.");
+    expect(initial.followUp).toContain("Adjuster not assigned.");
+
+    intake.stepOne.carrierId = "carrier-1";
+    intake.stepOne.carrierClaimNumber = "CLAIM-100";
+    intake.stepOne.assignedAttorneyId = "user-1";
+    intake.stepThree.nextActionDueDate = "2026-07-10";
+    const completed = getIntakeIssueGroups(intake);
+    expect(completed.required).toEqual([]);
+    expect(completed.followUp).toContain("Responsible party not identified.");
+  });
+
+  it("starts intake with no selected evidence and exposes auto-subrogation recommendations", () => {
+    const intake = createEmptyIntake();
+    expect(intake.stepTwo.evidence).toEqual([]);
+    expect(recommendedEvidenceByMatterType.auto_subrogation).toEqual([
+      "police_or_incident_report",
+      "photographs",
+      "repair_estimate",
+      "repair_invoice",
+      "payment_ledger",
+      "insurance_information",
+    ]);
   });
 
   it("requires a responsible firm user before completing matter details", () => {

@@ -34,7 +34,8 @@ type PackagesWorkspaceProps = {
   result: PackageWorkspaceResult;
 };
 
-const actionViewIds = new Set(["needs-validation", "ready-for-review", "changes-requested", "unverified-recipients", "missing-attachments"]);
+const primaryViewIds = ["my-drafts", "needs-validation", "ready-for-review", "changes-requested"];
+const moreViewIds = ["approved-for-send", "unverified-recipients", "missing-attachments", "upcoming-deadlines"];
 const severityRank: Record<PackageValidation["severity"], number> = {
   critical: 5,
   high: 4,
@@ -50,24 +51,35 @@ export function PackagesWorkspace({ result }: PackagesWorkspaceProps) {
   return (
     <div className="space-y-5">
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {packageViews.map((view) => {
-          const isActive = result.query.view === view.id;
-          const requiresAction = actionViewIds.has(view.id);
-          return (
+        {packageViews.filter((view) => primaryViewIds.includes(view.id)).map((view) => (
+          <PackageViewCard
+            active={result.query.view === view.id}
+            count={result.viewCounts[view.id] ?? 0}
+            href={`/packages?${createPackageQueryString(result.query, { view: view.id, page: 1 })}`}
+            key={view.id}
+            name={view.name}
+          />
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
+        <p className="text-sm font-semibold text-foreground">More Views</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {packageViews.filter((view) => moreViewIds.includes(view.id)).map((view) => (
             <Link
               className={cn(
-                "min-w-0 rounded-lg border bg-card p-3 shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                requiresAction ? "border-primary/25" : "border-border",
-                isActive ? "border-primary bg-[var(--info-muted)]" : null,
+                "inline-flex min-h-8 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                (result.viewCounts[view.id] ?? 0) === 0 ? "border-border text-muted-foreground" : "border-primary/25 text-foreground",
+                result.query.view === view.id && "border-primary bg-[var(--info-muted)] text-foreground"
               )}
               href={`/packages?${createPackageQueryString(result.query, { view: view.id, page: 1 })}`}
               key={view.id}
             >
-              <p className="truncate text-sm font-semibold text-foreground" title={view.name}>{view.name}</p>
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground" title={view.description}>{view.description}</p>
+              {view.name}
+              <span className="rounded-full bg-secondary px-1.5 py-0.5 text-xs">{result.viewCounts[view.id] ?? 0}</span>
             </Link>
-          );
-        })}
+          ))}
+        </div>
       </div>
 
       <Card className="border-border bg-card shadow-sm">
@@ -152,26 +164,44 @@ export function PackagesWorkspace({ result }: PackagesWorkspaceProps) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <p>Showing {result.rangeStart}-{result.rangeEnd} of {result.totalCount} packages</p>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild disabled={result.query.page <= 1} size="sm" variant="outline">
-                <Link aria-disabled={result.query.page <= 1} href={`/packages?${createPackageQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}>
-                  <ChevronLeft aria-hidden="true" className="size-4" />
-                  Previous
-                </Link>
-              </Button>
-              <Button asChild disabled={result.rangeEnd >= result.totalCount} size="sm" variant="outline">
-                <Link aria-disabled={result.rangeEnd >= result.totalCount} href={`/packages?${createPackageQueryString(result.query, { page: result.query.page + 1 })}`}>
-                  Next
-                  <ChevronRight aria-hidden="true" className="size-4" />
-                </Link>
-              </Button>
+          {result.totalCount > result.query.pageSize ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <p>Showing {result.rangeStart}-{result.rangeEnd} of {result.totalCount} packages</p>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild disabled={result.query.page <= 1} size="sm" variant="outline">
+                  <Link aria-disabled={result.query.page <= 1} href={`/packages?${createPackageQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}>
+                    <ChevronLeft aria-hidden="true" className="size-4" />
+                    Previous
+                  </Link>
+                </Button>
+                <Button asChild disabled={result.rangeEnd >= result.totalCount} size="sm" variant="outline">
+                  <Link aria-disabled={result.rangeEnd >= result.totalCount} href={`/packages?${createPackageQueryString(result.query, { page: result.query.page + 1 })}`}>
+                    Next
+                    <ChevronRight aria-hidden="true" className="size-4" />
+                  </Link>
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </>
       )}
     </div>
+  );
+}
+
+function PackageViewCard({ active, count, href, name }: { active: boolean; count: number; href: string; name: string }) {
+  return (
+    <Link
+      className={cn(
+        "min-w-0 rounded-lg border bg-card p-3 shadow-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        count === 0 ? "border-border opacity-70" : "border-primary/25",
+        active && "border-primary bg-[var(--info-muted)] opacity-100"
+      )}
+      href={href}
+    >
+      <p className="truncate text-sm font-semibold text-foreground" title={name}>{name}</p>
+      <p className={cn("mt-2 text-2xl font-semibold", count === 0 ? "text-muted-foreground" : "text-foreground")}>{count}</p>
+    </Link>
   );
 }
 

@@ -9,8 +9,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createDocumentId, createStoragePath, matterDocumentBucket, validateDocumentFileMetadata } from "@/lib/documents-packages/storage";
 import { scanFileForMalware } from "@/lib/documents-packages/scanning";
-import { resetVerificationOnEmailChange } from "@/lib/documents-packages/validation";
-import type { DocumentScanStatus, DocumentStatus } from "@/lib/documents-packages/types";
+import { getPackageApprovalBlockers, resetVerificationOnEmailChange } from "@/lib/documents-packages/validation";
+import type { DocumentScanStatus, DocumentStatus, OutboundPackage } from "@/lib/documents-packages/types";
 
 export type DocumentPackageActionResult = { ok: true; message: string } | { ok: false; message: string; fieldErrors?: Record<string, string> };
 
@@ -374,6 +374,15 @@ export async function approvePackageForSendAction(formData: FormData): Promise<D
   if (!isSupabaseConfigured()) return { ok: true, message: "Package approved for the later send workflow in development mode." };
   const supabase = await createClient();
   const now = new Date().toISOString();
+  const approvalPackage = await loadPackageApprovalFacts(parsed.data.packageId);
+  if (!approvalPackage) return { ok: false, message: "We could not find this package." };
+  const blockers = getPackageApprovalBlockers(approvalPackage);
+  if (blockers.length > 0) {
+    const fallbackStatus = approvalPackage.status === "approved_for_send" ? "validation_needed" : approvalPackage.status;
+    await supabase.from("outbound_packages").update({ status: fallbackStatus, approved_by: null, approved_at: null }).eq("id", parsed.data.packageId);
+    revalidatePath("/packages");
+    return { ok: false, message: `Package cannot be approved yet. ${blockers[0]}` };
+  }
   await supabase.from("outbound_package_reviews").insert({
     package_id: parsed.data.packageId,
     reviewer_id: permission.profile.id,
@@ -433,4 +442,75 @@ async function logActivity(matterId: string, actorId: string, actionType: string
 function revalidateMatter(matterId: string) {
   revalidatePath(`/matters/${matterId}`);
   revalidatePath("/matters");
+}
+
+async function loadPackageApprovalFacts(packageId: string): Promise<Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations"> | null> {
+  const supabase = await createClient();
+  const [{ data: pkg }, { data: recipients }, { data: packageDocuments }, { data: validations }, { data: reviews }] = await Promise.all([
+    supabase.from("outbound_packages").select("status,cover_document_id").eq("id", packageId).maybeSingle(),
+    supabase.from("outbound_package_recipients").select("id,recipient_name_snapshot,organization_name_snapshot,email_address,email_source,recipient_role,relationship_to_matter,verification_status,verified_at,verification_note,is_primary").eq("package_id", packageId),
+    supabase.from("outbound_package_documents").select("id,document_id,document_version_number_snapshot,display_filename_snapshot,document_type_snapshot,sort_order,is_required").eq("package_id", packageId),
+    supabase.from("outbound_package_validations").select("id,validation_key,status,severity,title,description,override_reason,resolved_at").eq("package_id", packageId),
+    supabase.from("outbound_package_reviews").select("id,review_type,decision,comments,created_at").eq("package_id", packageId),
+  ]);
+
+  if (!pkg) return null;
+  const documentIds = ((packageDocuments ?? []) as Array<{ document_id: string }>).map((document) => document.document_id);
+  const { data: matterDocuments } = documentIds.length > 0
+    ? await supabase.from("matter_documents").select("id,status,scan_status,visibility,title").in("id", documentIds)
+    : { data: [] };
+  const documentStatus = new Map((matterDocuments ?? []).map((document) => [String(document.id), document]));
+
+  return {
+    status: String(pkg.status) as OutboundPackage["status"],
+    coverDocumentId: pkg.cover_document_id ? String(pkg.cover_document_id) : null,
+    recipients: ((recipients ?? []) as Array<Record<string, unknown>>).map((recipient) => ({
+      id: String(recipient.id),
+      recipientNameSnapshot: String(recipient.recipient_name_snapshot),
+      organizationNameSnapshot: typeof recipient.organization_name_snapshot === "string" ? recipient.organization_name_snapshot : null,
+      emailAddress: typeof recipient.email_address === "string" ? recipient.email_address : null,
+      emailSource: String(recipient.email_source) as OutboundPackage["recipients"][number]["emailSource"],
+      recipientRole: String(recipient.recipient_role) as OutboundPackage["recipients"][number]["recipientRole"],
+      relationshipToMatter: typeof recipient.relationship_to_matter === "string" ? recipient.relationship_to_matter : null,
+      verificationStatus: String(recipient.verification_status) as OutboundPackage["recipients"][number]["verificationStatus"],
+      verifiedByName: null,
+      verifiedAt: typeof recipient.verified_at === "string" ? recipient.verified_at : null,
+      verificationNote: typeof recipient.verification_note === "string" ? recipient.verification_note : null,
+      isPrimary: Boolean(recipient.is_primary),
+    })),
+    documents: ((packageDocuments ?? []) as Array<Record<string, unknown>>).map((document) => {
+      const status = documentStatus.get(String(document.document_id));
+      return {
+        id: String(document.id),
+        documentId: String(document.document_id),
+        title: typeof status?.title === "string" ? status.title : String(document.display_filename_snapshot),
+        documentVersionNumberSnapshot: Number(document.document_version_number_snapshot) || 1,
+        displayFilenameSnapshot: String(document.display_filename_snapshot),
+        documentTypeSnapshot: String(document.document_type_snapshot) as OutboundPackage["documents"][number]["documentTypeSnapshot"],
+        scanStatus: String(status?.scan_status ?? "not_scanned") as OutboundPackage["documents"][number]["scanStatus"],
+        visibility: String(status?.visibility ?? "package_eligible") as OutboundPackage["documents"][number]["visibility"],
+        status: String(status?.status ?? "available") as OutboundPackage["documents"][number]["status"],
+        sortOrder: Number(document.sort_order) || 1,
+        isRequired: Boolean(document.is_required),
+      };
+    }),
+    validations: ((validations ?? []) as Array<Record<string, unknown>>).map((validation) => ({
+      id: String(validation.id),
+      validationKey: String(validation.validation_key),
+      status: String(validation.status) as OutboundPackage["validations"][number]["status"],
+      severity: String(validation.severity) as OutboundPackage["validations"][number]["severity"],
+      title: String(validation.title),
+      description: String(validation.description),
+      overrideReason: typeof validation.override_reason === "string" ? validation.override_reason : null,
+      resolvedAt: typeof validation.resolved_at === "string" ? validation.resolved_at : null,
+    })),
+    reviews: ((reviews ?? []) as Array<Record<string, unknown>>).map((review) => ({
+      id: String(review.id),
+      reviewerName: null,
+      reviewType: String(review.review_type) as OutboundPackage["reviews"][number]["reviewType"],
+      decision: String(review.decision) as OutboundPackage["reviews"][number]["decision"],
+      comments: typeof review.comments === "string" ? review.comments : null,
+      createdAt: String(review.created_at),
+    })),
+  };
 }

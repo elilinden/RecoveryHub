@@ -30,6 +30,8 @@ export type MatterStatus =
   | "Other"
   | "Deadline verified"
   | "Unverified statute deadline"
+  | "Deadline unverified"
+  | "Critical deadline"
   | "Action overdue"
   | "Stale matter"
   | "Awaiting overdue response"

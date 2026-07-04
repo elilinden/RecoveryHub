@@ -27,9 +27,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const mode = readParam(params.mode);
   const dashboard = await loadDashboardData({ profile: session.profile, mode });
 
-  const urgentMatters = dedupeMatters([...dashboard.priorityQueue, ...dashboard.needsFollowUp, ...dashboard.missingInformation]);
+  const urgentMatters = dedupeMatters([...dashboard.priorityQueue, ...dashboard.missingInformation]);
   const greeting = greetingFromDate(dashboard.today);
   const dateLabel = new Date(dashboard.today).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const activeMatterIds = new Set(urgentMatters.map((matter) => matter.snapshot.id));
+  const followUpMatters = dashboard.needsFollowUp.filter((matter) => !activeMatterIds.has(matter.snapshot.id));
 
   return (
     <div className="space-y-6">
@@ -94,9 +96,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent className="mt-4 space-y-3" value="urgent">
+            <TabsContent className="mt-4 space-y-2" value="urgent">
               {urgentMatters.length > 0 ? (
-                urgentMatters.map((matter) => <UrgentMatterRow key={matter.snapshot.id} matter={matter} />)
+                <>
+                  {urgentMatters.slice(0, 5).map((matter) => <UrgentMatterRow key={matter.snapshot.id} matter={matter} />)}
+                  <ViewAllLink count={urgentMatters.length} href="/matters?view=needs-follow-up" label="urgent matters" />
+                </>
               ) : (
                 <InlineEmpty description="No overdue actions, urgent deadlines, or missing information right now." title="Nothing urgent" />
               )}
@@ -104,15 +109,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
             <TabsContent className="mt-4 space-y-2" value="tasks">
               {dashboard.myTasks.length > 0 ? (
-                dashboard.myTasks.map((task) => (
-                  <CompactRow
-                    href={`/matters/${task.matterId}#tasks`}
-                    key={task.id}
-                    meta={`${task.carrierName} · ${task.dueDate ? `Due ${task.dueDate}` : "No due date"}`}
-                    right={<StatusBadge status={taskStatusLabels[task.status] as MatterStatus} />}
-                    title={`${task.title} · ${task.matterName}`}
-                  />
-                ))
+                <>
+                  {dashboard.myTasks.slice(0, 5).map((task) => (
+                    <CompactRow
+                      href={`/matters/${task.matterId}#tasks`}
+                      key={task.id}
+                      meta={`${task.carrierName} · ${task.dueDate ? `Due ${task.dueDate}` : "No due date"}`}
+                      right={<StatusBadge status={taskStatusLabels[task.status] as MatterStatus} />}
+                      title={`${task.title} · ${task.matterName}`}
+                    />
+                  ))}
+                  <ViewAllLink count={dashboard.myTasks.length} href="/matters?view=my-tasks" label="tasks" />
+                </>
               ) : (
                 <InlineEmpty description="You have no overdue tasks or tasks due soon." title="You are caught up" />
               )}
@@ -120,36 +128,37 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
             <TabsContent className="mt-4 space-y-2" value="deadlines">
               {dashboard.upcomingDeadlines.length > 0 ? (
-                dashboard.upcomingDeadlines.map((deadline) => (
-                  <CompactRow
-                    href={`/matters/${deadline.matterId}#deadlines`}
-                    key={deadline.id}
-                    meta={`${deadline.deadlineType.replaceAll("_", " ")} · ${deadline.daysRemaining < 0 ? `${Math.abs(deadline.daysRemaining)} days overdue` : `${deadline.daysRemaining} days remaining`} · ${deadline.isVerified ? "Verified" : "Needs verification"}`}
-                    right={<DateDisplay value={deadline.deadlineDate} />}
-                    title={`${deadline.title} · ${deadline.matterName}`}
-                  />
-                ))
+                <>
+                  {dashboard.upcomingDeadlines.slice(0, 5).map((deadline) => (
+                    <CompactRow
+                      href={`/matters/${deadline.matterId}#deadlines`}
+                      key={deadline.id}
+                      meta={`${deadline.deadlineType.replaceAll("_", " ")} · ${deadline.daysRemaining < 0 ? `${Math.abs(deadline.daysRemaining)} days overdue` : `${deadline.daysRemaining} days remaining`} · ${deadline.isVerified ? "Verified" : "Needs verification"}`}
+                      right={<DateDisplay value={deadline.deadlineDate} />}
+                      title={`${deadline.title} · ${deadline.matterName}`}
+                    />
+                  ))}
+                  <ViewAllLink count={dashboard.upcomingDeadlines.length} href="/matters?view=upcoming-deadlines" label="deadlines" />
+                </>
               ) : (
                 <InlineEmpty description="No recorded deadlines fall within the tracked window." title="No deadlines approaching" />
               )}
-              {dashboard.upcomingDeadlines.length > 0 ? (
-                <Button asChild className="mt-1" variant="link">
-                  <Link href="/matters?view=upcoming-deadlines">View all deadlines</Link>
-                </Button>
-              ) : null}
             </TabsContent>
 
             <TabsContent className="mt-4 space-y-2" value="followup">
-              {dashboard.needsFollowUp.length > 0 ? (
-                dashboard.needsFollowUp.map((matter) => (
-                  <CompactRow
-                    href={`/matters/${matter.snapshot.id}#attention`}
-                    key={matter.snapshot.id}
-                    meta={`${matter.primaryFlag?.suggestedAction ?? "Review the next step"} · ${matter.snapshot.assignedFirmUser}`}
-                    right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
-                    title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
-                  />
-                ))
+              {followUpMatters.length > 0 ? (
+                <>
+                  {followUpMatters.slice(0, 5).map((matter) => (
+                    <CompactRow
+                      href={`/matters/${matter.snapshot.id}#attention`}
+                      key={matter.snapshot.id}
+                      meta={`${matter.primaryFlag?.suggestedAction ?? "Review the next step"} · ${matter.snapshot.assignedFirmUser}`}
+                      right={matter.primaryFlag ? <TriageSeverityBadge severity={matter.primaryFlag.severity} /> : null}
+                      title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
+                    />
+                  ))}
+                  <ViewAllLink count={dashboard.needsFollowUp.length} href="/matters?view=needs-follow-up" label="follow-up matters" />
+                </>
               ) : (
                 <InlineEmpty description="No matters are waiting on a response or stuck without a next action." title="Nothing waiting on follow-up" />
               )}
@@ -335,10 +344,16 @@ function TodayMetric({ label, count, href, tone }: { label: string; count: numbe
 function UrgentMatterRow({ matter }: { matter: DashboardMatter }) {
   const flag = matter.primaryFlag;
   const otherFlags = matter.flags.filter((item) => item !== flag);
+  const borderTone =
+    flag?.severity === "critical"
+      ? "border-l-[color:var(--urgent)]"
+      : flag?.severity === "high"
+        ? "border-l-[color:var(--warning)]"
+        : "border-l-primary";
 
   return (
-    <div className="rounded-lg border border-border bg-background p-4 transition-colors hover:border-primary/30">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className={cn("rounded-lg border border-l-4 border-border bg-background p-3 transition-colors hover:border-primary/30", borderTone)}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link className="font-semibold text-foreground hover:underline" href={`/matters/${matter.snapshot.id}`}>
@@ -346,12 +361,11 @@ function UrgentMatterRow({ matter }: { matter: DashboardMatter }) {
             </Link>
             {flag ? <TriageSeverityBadge severity={flag.severity} /> : null}
           </div>
-          <p className="mt-1.5 text-sm font-medium text-foreground">{flag?.title ?? "No current issue"}</p>
-          {flag ? <p className="mt-0.5 text-sm leading-6 text-muted-foreground">{flag.explanation}</p> : null}
+          <p className="mt-1 text-sm font-medium text-foreground">{flag?.title ?? "No current issue"}</p>
           {otherFlags.length > 0 ? (
-            <details className="mt-2 group/details">
+            <details className="mt-1 group/details">
               <summary className="cursor-pointer text-sm font-medium text-primary select-none">
-                +{otherFlags.length} other {otherFlags.length === 1 ? "issue" : "issues"} on this matter
+                {otherFlags.length} more {otherFlags.length === 1 ? "issue" : "issues"}
               </summary>
               <ul className="mt-2 space-y-1 border-l-2 border-border pl-3 text-sm text-muted-foreground">
                 {otherFlags.map((item) => (
@@ -361,16 +375,14 @@ function UrgentMatterRow({ matter }: { matter: DashboardMatter }) {
             </details>
           ) : null}
         </div>
-        <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-sm sm:shrink-0 sm:grid-cols-1 sm:text-right">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4 lg:shrink-0 lg:text-right">
           <MiniField label="Responsible" value={matter.snapshot.assignedFirmUser} />
           <MiniField label="Due" value={matter.snapshot.nextActionDueDate ? <DateDisplay value={matter.snapshot.nextActionDueDate} /> : "Not set"} />
           <MiniField label="Amount" value={<CurrencyDisplay value={matter.snapshot.amountSought} />} />
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/matters/${matter.snapshot.id}`}>Open Matter</Link>
+          </Button>
         </div>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button asChild size="sm" variant="outline">
-          <Link href={`/matters/${matter.snapshot.id}`}>Open Matter</Link>
-        </Button>
       </div>
     </div>
   );
@@ -394,6 +406,15 @@ function CompactRow({ title, meta, href, right }: { title: string; meta: string;
       </span>
       {right ? <span className="shrink-0 text-sm text-muted-foreground">{right}</span> : null}
     </Link>
+  );
+}
+
+function ViewAllLink({ count, href, label }: { count: number; href: string; label: string }) {
+  if (count <= 5) return null;
+  return (
+    <Button asChild className="mt-1" variant="link">
+      <Link href={href}>View all {count} {label}</Link>
+    </Button>
   );
 }
 

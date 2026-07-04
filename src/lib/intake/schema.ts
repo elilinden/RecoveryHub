@@ -86,12 +86,23 @@ export const evidenceTypeOptions = [
 export const evidenceStatusOptions = [
   { value: "received", label: "Received" },
   { value: "requested", label: "Requested" },
-  { value: "missing", label: "Missing" },
+  { value: "missing", label: "Needed" },
   { value: "not_available", label: "Not available" },
   { value: "not_applicable", label: "Not applicable" },
 ] as const;
 
 export const yesNoUnknownOptions = ["yes", "no", "unknown", "not_applicable"] as const;
+
+export const recommendedEvidenceByMatterType: Partial<Record<(typeof matterTypeOptions)[number]["value"], string[]>> = {
+  auto_subrogation: [
+    "police_or_incident_report",
+    "photographs",
+    "repair_estimate",
+    "repair_invoice",
+    "payment_ledger",
+    "insurance_information",
+  ],
+};
 
 const optionalString = z.string().trim().optional().or(z.literal(""));
 const idString = z.string().trim().min(1);
@@ -102,7 +113,6 @@ function optionValues<const T extends readonly [{ value: string }, ...{ value: s
 const currencyString = z
   .string()
   .trim()
-  .default("0")
   .refine((value) => value === "" || /^\d+(\.\d{1,2})?$/.test(value), "Enter a non-negative dollar amount.");
 
 export const intakeStepOneSchema = z.object({
@@ -221,12 +231,31 @@ export function calculateSuggestedAmountSought(input: {
   deductible: string;
   recoverableExpenses: string;
 }) {
+  const enteredValues = [input.amountPaid, input.deductible, input.recoverableExpenses].filter((value) => value.trim() !== "");
+  if (enteredValues.length === 0) return "";
   const cents = [input.amountPaid, input.deductible, input.recoverableExpenses].reduce((total, value) => {
     const parsed = Number.parseFloat(value || "0");
     return total + Math.round((Number.isFinite(parsed) ? parsed : 0) * 100);
   }, 0);
 
   return (cents / 100).toFixed(2);
+}
+
+export function getIntakeIssueGroups(data: IntakeFormData) {
+  const required: string[] = [];
+  const followUp: string[] = [];
+  if (!data.stepOne.carrierId) required.push("Missing carrier.");
+  if (!data.stepOne.carrierClaimNumber) required.push("Missing claim number.");
+  if (!data.stepOne.assignedAttorneyId && !data.stepOne.assignedAttorneyIds.length && !data.stepOne.assignedStaffIds.length && !data.stepOne.assignedStaffId) required.push("No responsible internal user.");
+  if (!data.stepThree.nextAction) required.push("No next action.");
+  if (!data.stepThree.nextActionDueDate) required.push("No next-action due date.");
+
+  if (!data.stepOne.assignedAdjusterId) followUp.push("Adjuster not assigned.");
+  if (!data.stepTwo.parties.some((party) => party.role === "responsible_party")) followUp.push("Responsible party not identified.");
+  if (data.stepTwo.insuranceStatus === "unknown") followUp.push("Insurance status unknown.");
+  if (!data.stepTwo.evidence.some((item) => item.evidenceType === "payment_ledger" && item.status === "received")) followUp.push("Payment documentation not received.");
+  if (data.stepTwo.liabilityAssessment === "unknown") followUp.push("Liability not yet assessed.");
+  return { required, followUp };
 }
 
 export function validateIntakeStep(step: number, data: IntakeFormData) {
@@ -261,18 +290,18 @@ export function createEmptyIntake(): IntakeFormData {
       supervisingPartnerId: "",
     },
     stepTwo: {
-      amountPaid: "0.00",
-      deductible: "0.00",
-      anticipatedAdditionalPayments: "0.00",
-      recoverableExpenses: "0.00",
-      amountSought: "0.00",
-      estimatedLegalCost: "0.00",
+      amountPaid: "",
+      deductible: "",
+      anticipatedAdditionalPayments: "",
+      recoverableExpenses: "",
+      amountSought: "",
+      estimatedLegalCost: "",
       amountSoughtManuallyChanged: false,
       insuranceStatus: "unknown",
       adverseInsurer: "",
       adverseClaimNumber: "",
       adverseAdjuster: "",
-      policyLimits: "0.00",
+      policyLimits: "",
       liabilityAssessment: "unknown",
       collectabilityAssessment: "unknown",
       liabilitySummary: "",

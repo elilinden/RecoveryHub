@@ -7,7 +7,7 @@ import type {
   PackageReview,
   PackageWorkspaceQuery,
 } from "@/lib/documents-packages/types";
-import { validateOutboundPackage } from "@/lib/documents-packages/validation";
+import { canApprovePackageForSend, validateOutboundPackage } from "@/lib/documents-packages/validation";
 
 const baseDate = "2026-07-03T14:30:00.000Z";
 
@@ -317,7 +317,7 @@ export const developmentPackages: OutboundPackage[] = [
   createPackage({
     id: "pkg-lakeview-approved",
     matterId: "lakeview-delivery-collision",
-    status: "approved_for_send",
+    status: "validation_needed",
     title: "Approved follow-up package",
     recipientVerification: "verified",
     email: "recovery-desk@example.com",
@@ -349,13 +349,8 @@ export function listDevelopmentMatterPackages(matterId: string) {
 
 export function listDevelopmentPackages(query: PackageWorkspaceQuery) {
   let packages = [...developmentPackages];
-  if (query.view === "my-drafts") packages = packages.filter((item) => item.status === "draft");
-  if (query.view === "needs-validation") packages = packages.filter((item) => item.status === "validation_needed");
-  if (query.view === "ready-for-review") packages = packages.filter((item) => item.status === "ready_for_review");
-  if (query.view === "changes-requested") packages = packages.filter((item) => item.status === "changes_requested");
-  if (query.view === "approved-for-send") packages = packages.filter((item) => item.status === "approved_for_send");
-  if (query.view === "unverified-recipients") packages = packages.filter((item) => item.recipients.some((recipient) => recipient.verificationStatus !== "verified"));
-  if (query.view === "missing-attachments") packages = packages.filter((item) => item.validations.some((validation) => validation.validationKey === "attachments_present" && validation.status === "failed"));
+  const viewCounts = getPackageViewCounts(packages);
+  if (query.view) packages = packages.filter((item) => packageMatchesView(item, query.view));
   if (query.status) packages = packages.filter((item) => item.status === query.status);
   if (query.packageType) packages = packages.filter((item) => item.packageType === query.packageType);
   if (query.verification) packages = packages.filter((item) => item.recipients.some((recipient) => recipient.verificationStatus === query.verification));
@@ -376,7 +371,33 @@ export function listDevelopmentPackages(query: PackageWorkspaceQuery) {
     totalCount: packages.length,
     rangeStart: pageItems.length === 0 ? 0 : from + 1,
     rangeEnd: from + pageItems.length,
+    viewCounts,
   };
+}
+
+function getPackageViewCounts(packages: OutboundPackage[]) {
+  return {
+    "my-drafts": packages.filter((item) => packageMatchesView(item, "my-drafts")).length,
+    "needs-validation": packages.filter((item) => packageMatchesView(item, "needs-validation")).length,
+    "ready-for-review": packages.filter((item) => packageMatchesView(item, "ready-for-review")).length,
+    "changes-requested": packages.filter((item) => packageMatchesView(item, "changes-requested")).length,
+    "approved-for-send": packages.filter((item) => packageMatchesView(item, "approved-for-send")).length,
+    "unverified-recipients": packages.filter((item) => packageMatchesView(item, "unverified-recipients")).length,
+    "missing-attachments": packages.filter((item) => packageMatchesView(item, "missing-attachments")).length,
+    "upcoming-deadlines": packages.filter((item) => packageMatchesView(item, "upcoming-deadlines")).length,
+  };
+}
+
+function packageMatchesView(item: OutboundPackage, view: string) {
+  if (view === "my-drafts") return item.status === "draft" || item.status === "assembling";
+  if (view === "needs-validation") return item.status === "validation_needed" || !canApprovePackageForSend(item);
+  if (view === "ready-for-review") return item.status === "ready_for_review" && canApprovePackageForSend(item);
+  if (view === "changes-requested") return item.status === "changes_requested";
+  if (view === "approved-for-send") return item.status === "approved_for_send" && canApprovePackageForSend(item);
+  if (view === "unverified-recipients") return item.recipients.length === 0 || item.recipients.some((recipient) => recipient.verificationStatus !== "verified");
+  if (view === "missing-attachments") return item.documents.length === 0 || item.validations.some((validation) => ["attachments_present", "cover_document_exists", "payment_proof_included"].includes(validation.validationKey) && validation.status === "failed");
+  if (view === "upcoming-deadlines") return Boolean(item.responseDeadline);
+  return true;
 }
 
 function createPackage(input: {

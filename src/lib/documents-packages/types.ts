@@ -222,6 +222,7 @@ export type PackageWorkspaceResult = {
   totalCount: number;
   rangeStart: number;
   rangeEnd: number;
+  viewCounts: Record<string, number>;
 };
 
 export type DocumentPackagePermissions = {

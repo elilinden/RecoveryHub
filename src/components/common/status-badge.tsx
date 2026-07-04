@@ -63,6 +63,8 @@ const statusConfig: Record<MatterStatus, { tone: Tone; icon: ComponentType<{ cla
   Other: { tone: "neutral", icon: Circle },
   "Deadline verified": { tone: "success", icon: CheckCircle2 },
   "Unverified statute deadline": { tone: "urgent", icon: AlertCircle },
+  "Deadline unverified": { tone: "urgent", icon: AlertCircle },
+  "Critical deadline": { tone: "urgent", icon: Clock3 },
   "Action overdue": { tone: "urgent", icon: Clock3 },
   "Stale matter": { tone: "warning", icon: Clock3 },
   "Awaiting overdue response": { tone: "warning", icon: Clock3 },

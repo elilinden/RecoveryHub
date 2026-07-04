@@ -21,7 +21,7 @@ type MatterWorkspaceCardProps = {
 const warningStatus: Partial<Record<MatterWarning, MatterStatus>> = {
   overdue_next_action: "Action overdue",
   deadline_within_30: "Deadline soon",
-  unverified_statute_deadline: "Unverified statute deadline",
+  unverified_statute_deadline: "Deadline unverified",
   missing_next_action: "No next action",
   stale_matter: "Stale matter",
   draft_intake: "Draft intake",
@@ -103,7 +103,7 @@ export function MatterWorkspaceCard({ matter }: MatterWorkspaceCardProps) {
 }
 
 export function MatterWarnings({ warnings, max = 3 }: { warnings: MatterWarning[]; max?: number }) {
-  if (warnings.length === 0) return <StatusBadge status="No immediate action" />;
+  if (warnings.length === 0) return null;
 
   return (
     <StatusBadgeList

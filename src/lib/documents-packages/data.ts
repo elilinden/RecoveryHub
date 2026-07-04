@@ -57,7 +57,16 @@ export async function loadPackagesWorkspace(input: {
   }
 
   const supabase = await createClient();
+  const viewCounts = await loadPackageViewCounts();
   let packageQuery = supabase.from("outbound_packages").select("*", { count: "exact" });
+  const viewPackageIds = await loadPackageIdsForRelationshipView(query.view);
+  if (query.view === "my-drafts") packageQuery = packageQuery.in("status", ["draft", "assembling"]);
+  if (query.view === "needs-validation") packageQuery = packageQuery.eq("status", "validation_needed");
+  if (query.view === "ready-for-review") packageQuery = packageQuery.eq("status", "ready_for_review");
+  if (query.view === "changes-requested") packageQuery = packageQuery.eq("status", "changes_requested");
+  if (query.view === "approved-for-send") packageQuery = packageQuery.eq("status", "approved_for_send");
+  if (query.view === "upcoming-deadlines") packageQuery = packageQuery.not("response_deadline", "is", null);
+  if (viewPackageIds) packageQuery = viewPackageIds.length > 0 ? packageQuery.in("id", viewPackageIds) : packageQuery.eq("id", "00000000-0000-0000-0000-000000000000");
   if (query.status) packageQuery = packageQuery.eq("status", query.status);
   if (query.packageType) packageQuery = packageQuery.eq("package_type", query.packageType);
   if (query.q) {
@@ -79,6 +88,51 @@ export async function loadPackagesWorkspace(input: {
     totalCount: count ?? packages.length,
     rangeStart: packages.length === 0 ? 0 : from + 1,
     rangeEnd: from + packages.length,
+    viewCounts,
+  };
+}
+
+async function loadPackageIdsForRelationshipView(view: string) {
+  if (view !== "unverified-recipients" && view !== "missing-attachments") return null;
+  const supabase = await createClient();
+  if (view === "unverified-recipients") {
+    const { data } = await supabase.from("outbound_package_recipients").select("package_id").neq("verification_status", "verified");
+    return [...new Set((data ?? []).map((row) => String(row.package_id)))];
+  }
+  const { data } = await supabase
+    .from("outbound_package_validations")
+    .select("package_id")
+    .eq("status", "failed")
+    .in("validation_key", ["attachments_present", "cover_document_exists", "payment_proof_included"]);
+  return [...new Set((data ?? []).map((row) => String(row.package_id)))];
+}
+
+async function loadPackageViewCounts() {
+  const supabase = await createClient();
+  const [{ data }, unverifiedIds, missingAttachmentIds] = await Promise.all([
+    supabase.from("outbound_packages").select("id,status,response_deadline,cover_document_id"),
+    loadPackageIdsForRelationshipView("unverified-recipients"),
+    loadPackageIdsForRelationshipView("missing-attachments"),
+  ]);
+  const packages = ((data ?? []) as PackageRow[]).map((row) => ({
+    status: stringValue(row.status) as OutboundPackage["status"],
+    coverDocumentId: nullableString(row.cover_document_id),
+    responseDeadline: nullableString(row.response_deadline),
+    recipients: [],
+    documents: [],
+    validations: [],
+    reviews: [],
+  }));
+
+  return {
+    "my-drafts": packages.filter((item) => item.status === "draft" || item.status === "assembling").length,
+    "needs-validation": packages.filter((item) => item.status === "validation_needed").length,
+    "ready-for-review": packages.filter((item) => item.status === "ready_for_review").length,
+    "changes-requested": packages.filter((item) => item.status === "changes_requested").length,
+    "approved-for-send": packages.filter((item) => item.status === "approved_for_send").length,
+    "unverified-recipients": unverifiedIds?.length ?? 0,
+    "missing-attachments": missingAttachmentIds?.length ?? 0,
+    "upcoming-deadlines": packages.filter((item) => Boolean(item.responseDeadline)).length,
   };
 }
 

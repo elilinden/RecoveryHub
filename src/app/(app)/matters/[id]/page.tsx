@@ -17,7 +17,6 @@ import { MatterTimeline } from "@/components/matters/matter-timeline";
 import { MatterDocumentsPackagesPanel } from "@/components/documents-packages/matter-documents-packages-panel";
 import { AssessmentSummaryCards } from "@/components/recovery-assessment/assessment-summary-cards";
 import { MatterTriagePanel } from "@/components/triage/matter-triage-panel";
-import { TriageSeverityBadge } from "@/components/triage/triage-severity-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireActiveProfile } from "@/lib/auth/session";
@@ -39,7 +38,7 @@ import { createSnapshotFromDetail } from "@/lib/triage/types";
 import { loadMatterAssessmentBundle } from "@/lib/recovery-assessment/data";
 import { loadMatterDocumentsAndPackages } from "@/lib/documents-packages/data";
 import { permissionsForRole } from "@/lib/documents-packages/types";
-import type { MatterAssignment } from "@/lib/matters-workspace/types";
+import type { MatterAssignment, MatterDetail } from "@/lib/matters-workspace/types";
 import {
   submitArchiveMatterAction,
   submitCloseMatterAction,
@@ -90,6 +89,23 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     ["assigned staff"],
     matter.assignedStaffName
   );
+  const missingDetails = getMissingMatterDetails(matter, assignedAttorneyNames, assignedStaffNames);
+  const headerBadges = getHeaderBadges(matter);
+  const summaryFields = [
+    { label: "Next action", value: matter.nextAction ?? "Not assigned" },
+    { label: "Responsible person", value: matter.assignedFirmUser },
+    { label: "Due date", value: matter.nextActionDueDate ? <DateDisplay value={matter.nextActionDueDate} /> : "Not set" },
+    { label: "Amount sought", value: <CurrencyDisplay value={matter.amountSought} /> },
+    { label: "Amount recovered", value: <CurrencyDisplay value={matter.amountRecovered} /> },
+    { label: "Statute deadline", value: matter.statuteDeadline ? <DateDisplay value={matter.statuteDeadline} /> : "Not entered" },
+    ...(assessment
+      ? [
+          { label: "Viability", value: `${assessment.viabilityScore}/100` },
+          { label: "Expected net value", value: <CurrencyDisplay value={assessment.expectedNetValue} /> },
+          { label: "Completeness", value: `${assessment.dataCompletenessPercentage}%` },
+        ]
+      : []),
+  ];
 
   const editStatusSheet = (
     <EditCurrentStatusSheet
@@ -109,40 +125,20 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
       value: "overview",
       label: "Overview",
       content: (
-        <Card className="border-border bg-card shadow-sm">
-          <CardContent className="grid gap-6 p-6 xl:grid-cols-2">
-            <Section title="Referral Information">
-              <Info label="Carrier" value={matter.carrierName} />
-              <Info label="Claim number" value={matter.carrierClaimNumber ?? "Not entered"} />
-              <Info label="Firm matter number" value={matter.firmMatterNumber ?? "Not entered"} />
-              <Info label="Date referred" value={matter.dateReferred ?? "Not entered"} />
-              <Info label="Date of loss" value={matter.dateOfLoss ?? "Not entered"} />
-              <Info label="Matter type" value={matterTypeLabels[matter.matterType]} />
-              <Info label="Jurisdiction" value={matter.jurisdiction ?? "Not entered"} />
-              <Info label="Venue" value={matter.venue ?? "Not entered"} />
-            </Section>
-            <Section title="Carrier Team">
-              <Info label="Assigned adjuster" value={matter.assignedAdjusterName ?? "Not assigned"} />
-              <Info label="Adjuster email" value={matter.adjusterEmail ?? "Not entered"} />
-              <Info label="Adjuster phone" value={matter.adjusterPhone ?? "Not entered"} />
-              <Info label="Department" value={matter.adjusterDepartment ?? "Not entered"} />
-              <Info label="Carrier supervisor" value={matter.carrierSupervisorName ?? "Not assigned"} />
-            </Section>
-            <Section title="Firm Team">
-              <Info label="Assigned attorneys" value={assignedAttorneyNames} />
-              <Info label="Assigned staff" value={assignedStaffNames} />
-            </Section>
-            <Section title="Liability and Insurance">
-              <Info label="Insurance status" value={insuranceStatusLabels[matter.insuranceStatus]} />
-              <Info label="Liability assessment" value={assessmentLabels[matter.liabilityAssessment]} />
-              <Info label="Collectability" value={assessmentLabels[matter.collectabilityAssessment]} />
-              <Info label="Adverse insurer" value={matter.adverseInsurer ?? "Not entered"} />
-              <Info label="Adverse claim" value={matter.adverseClaimNumber ?? "Not entered"} />
-              <Info label="Liability summary" value={matter.liabilitySummary ?? "Not entered"} />
-            </Section>
-            <Section title="Matter Parties">
+        <OverviewContent
+          assignedAttorneyNames={assignedAttorneyNames}
+          assignedStaffNames={assignedStaffNames}
+          matter={matter}
+          missingDetails={missingDetails}
+        >
+          <Section title="Matter Parties">
               {matter.parties.length === 0 ? (
-                <p className="py-2 text-sm text-muted-foreground">No parties associated yet.</p>
+                <ActionEmptyState
+                  actionHref={`/matters/${matter.id}/intake`}
+                  actionLabel="Add Party"
+                  description="Add the insured or responsible party to continue the recovery review."
+                  title="No responsible party added"
+                />
               ) : (
                 matter.parties.map((party) => (
                   <form action={submitUpsertPartyAction} className="rounded-lg border border-border bg-background p-3" key={party.id}>
@@ -177,11 +173,19 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             </Section>
             {matter.canViewInternalNotes ? (
               <Section title="Internal Notes">
-                <p className="py-2 text-sm leading-6 text-muted-foreground">{matter.internalNotes ?? "No internal notes recorded."}</p>
+                {matter.internalNotes ? (
+                  <p className="py-2 text-sm leading-6 text-muted-foreground">{matter.internalNotes}</p>
+                ) : (
+                  <ActionEmptyState
+                    actionHref="#current-status"
+                    actionLabel="Add Note"
+                    description="Internal notes can capture handling context that should not appear in external updates."
+                    title="No internal notes recorded"
+                  />
+                )}
               </Section>
             ) : null}
-          </CardContent>
-        </Card>
+        </OverviewContent>
       ),
     },
     {
@@ -193,7 +197,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
           <Card className="border-border bg-card shadow-sm" id="current-status">
             <CardContent className="space-y-4 p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <SectionHeader title="Current Status" />
+            <SectionHeader title="Current Status" />
                 {matter.permissions.canEditMatter ? editStatusSheet : null}
               </div>
               <p className="text-sm leading-6 text-muted-foreground">{matter.currentStatusSummary ?? "No status summary has been recorded yet."}</p>
@@ -396,7 +400,16 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
                 <Link href={`/matters/${matter.id}/assessment`}>{assessment ? "Open Assessment" : "Start Assessment"}</Link>
               </Button>
             </div>
-            <AssessmentSummaryCards assessment={assessment} primaryUrgency={primaryTriageFlag} />
+            {assessment ? (
+              <AssessmentSummaryCards assessment={assessment} primaryUrgency={primaryTriageFlag} />
+            ) : (
+              <ActionCallout
+                actionHref={`/matters/${matter.id}/assessment`}
+                actionLabel="Start Assessment"
+                description="Complete an assessment after the initial matter review."
+                title="Recovery assessment not started"
+              />
+            )}
             {assessmentBundle.current?.overrideReason ? (
               <div className="rounded-lg bg-[var(--warning-muted)] p-3 text-sm text-[var(--warning)]">
                 Attorney override recorded: {assessmentBundle.current.overrideReason}
@@ -444,17 +457,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
       />
 
       <StatusBadgeList
-        items={[
-          ...(primaryTriageFlag ? [{ key: "severity", node: <TriageSeverityBadge severity={primaryTriageFlag.severity} /> }] : []),
-          { key: "stage", node: <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} /> },
-          { key: "priority", node: <StatusBadge status={priorityLabels[matter.priority] as MatterStatus} /> },
-          {
-            key: "deadline",
-            node: matter.statuteDeadlineVerified ? <StatusBadge status="Deadline verified" /> : <StatusBadge status="Unverified statute deadline" />,
-          },
-          { key: "type", node: <StatusBadge status={matterTypeLabels[matter.matterType] as MatterStatus} /> },
-          { key: "intake", node: <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} /> },
-        ]}
+        items={headerBadges}
         max={3}
       />
 
@@ -472,17 +475,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
       ) : null}
 
       <MatterSummaryStrip
-        fields={[
-          { label: "Amount sought", value: <CurrencyDisplay value={matter.amountSought} /> },
-          { label: "Amount recovered", value: <CurrencyDisplay value={matter.amountRecovered} /> },
-          { label: "Statute deadline", value: matter.statuteDeadline ? <DateDisplay value={matter.statuteDeadline} /> : "Not entered" },
-          { label: "Next action", value: matter.nextAction ?? "Not assigned" },
-          { label: "Responsible person", value: matter.assignedFirmUser },
-          { label: "Current stage", value: matterStageLabels[matter.stage] },
-          { label: "Viability", value: assessment ? `${assessment.viabilityScore}/100` : "Not started" },
-          { label: "Expected net value", value: assessment ? <CurrencyDisplay value={assessment.expectedNetValue} /> : "Not started" },
-          { label: "Completeness", value: assessment ? `${assessment.dataCompletenessPercentage}%` : "Not started" },
-        ]}
+        fields={summaryFields}
       />
 
       <MatterDetailWorkspace
@@ -506,17 +499,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             <Link href="/matters">Back to matters</Link>
           </Button>
           <div className="flex flex-wrap gap-2">
-            {matter.stage !== "closed" && matter.permissions.canClose ? (
-              <form action={submitCloseMatterAction} className="flex flex-wrap gap-2">
-                <input name="matterId" type="hidden" value={matter.id} />
-                <input name="reason" type="hidden" value="Other" />
-                <input name="closingDate" type="hidden" value={new Date().toISOString().slice(0, 10)} />
-                <input name="note" type="hidden" value="Closed from matter detail." />
-                <Button type="submit" variant="outline">
-                  Close Matter
-                </Button>
-              </form>
-            ) : null}
+            <MatterMoreActions matter={matter} />
             {matter.stage === "closed" && matter.permissions.canReopen ? (
               <form action={submitReopenMatterAction} className="flex flex-wrap gap-2">
                 <input name="matterId" type="hidden" value={matter.id} />
@@ -527,21 +510,6 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
                 <input name="responsibleUser" type="hidden" value={matter.assignedAttorneyId ?? matter.assignedStaffId ?? ""} />
                 <Button type="submit" variant="outline">
                   Reopen Matter
-                </Button>
-              </form>
-            ) : null}
-            {matter.isArchived && matter.permissions.canRestore ? (
-              <form action={submitRestoreMatterAction}>
-                <input name="matterId" type="hidden" value={matter.id} />
-                <Button type="submit" variant="outline">
-                  Restore Matter
-                </Button>
-              </form>
-            ) : matter.permissions.canArchive ? (
-              <form action={submitArchiveMatterAction}>
-                <input name="matterId" type="hidden" value={matter.id} />
-                <Button type="submit" variant="outline">
-                  Archive Matter
                 </Button>
               </form>
             ) : null}
@@ -557,6 +525,168 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
   );
 }
 
+function OverviewContent({
+  assignedAttorneyNames,
+  assignedStaffNames,
+  children,
+  matter,
+  missingDetails,
+}: {
+  assignedAttorneyNames: string;
+  assignedStaffNames: string;
+  children: ReactNode;
+  matter: MatterDetail;
+  missingDetails: string[];
+}) {
+  const populatedGroups = [
+    {
+      title: "Referral Information",
+      items: [
+        ["Carrier", matter.carrierName],
+        ["Claim number", matter.carrierClaimNumber],
+        ["Firm matter number", matter.firmMatterNumber],
+        ["Date referred", matter.dateReferred],
+        ["Date of loss", matter.dateOfLoss],
+        ["Matter type", matterTypeLabels[matter.matterType]],
+        ["Jurisdiction", matter.jurisdiction],
+        ["Venue", matter.venue],
+      ] as Array<[string, ReactNode | null | undefined]>,
+    },
+    {
+      title: "Carrier Team",
+      items: [
+        ["Assigned adjuster", matter.assignedAdjusterName],
+        ["Adjuster email", matter.adjusterEmail],
+        ["Adjuster phone", matter.adjusterPhone],
+        ["Department", matter.adjusterDepartment],
+        ["Carrier supervisor", matter.carrierSupervisorName],
+      ] as Array<[string, ReactNode | null | undefined]>,
+    },
+    {
+      title: "Firm Team",
+      items: [
+        ["Assigned attorneys", assignedAttorneyNames === "Not assigned" ? null : assignedAttorneyNames],
+        ["Assigned staff", assignedStaffNames === "Not assigned" ? null : assignedStaffNames],
+      ] as Array<[string, ReactNode | null | undefined]>,
+    },
+    {
+      title: "Liability and Insurance",
+      items: [
+        ["Insurance status", matter.insuranceStatus === "unknown" ? null : insuranceStatusLabels[matter.insuranceStatus]],
+        ["Liability assessment", matter.liabilityAssessment === "unknown" ? null : assessmentLabels[matter.liabilityAssessment]],
+        ["Collectability", matter.collectabilityAssessment === "unknown" ? null : assessmentLabels[matter.collectabilityAssessment]],
+        ["Adverse insurer", matter.adverseInsurer],
+        ["Adverse claim", matter.adverseClaimNumber],
+        ["Liability summary", matter.liabilitySummary],
+      ] as Array<[string, ReactNode | null | undefined]>,
+    },
+  ];
+
+  return (
+    <Card className="border-border bg-card shadow-sm">
+      <CardContent className="grid gap-6 p-6 xl:grid-cols-2">
+        <MissingDetailsPanel count={missingDetails.length} examples={missingDetails.slice(0, 4)} matterId={matter.id} />
+        {populatedGroups.map((group) => {
+          const items = group.items.filter(([, value]) => isPresent(value));
+          if (items.length === 0) return null;
+          return (
+            <Section key={group.title} title={group.title}>
+              {items.map(([label, value]) => <Info key={label} label={label} value={value} />)}
+            </Section>
+          );
+        })}
+        {children}
+        <details className="xl:col-span-2 rounded-lg border border-border bg-background p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-primary">Show all fields</summary>
+          <div className="mt-4 grid gap-6 xl:grid-cols-2">
+            {populatedGroups.map((group) => (
+              <Section key={group.title} title={group.title}>
+                {group.items.map(([label, value]) => <Info key={label} label={label} value={isPresent(value) ? value : "Not entered"} />)}
+              </Section>
+            ))}
+          </div>
+        </details>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MissingDetailsPanel({ count, examples, matterId }: { count: number; examples: string[]; matterId: string }) {
+  if (count === 0) return null;
+  const exampleText = `${examples.join(", ")}${count > examples.length ? `, and ${count - examples.length} more` : ""}`;
+  return (
+    <div className="xl:col-span-2 rounded-lg border border-[color:var(--warning)]/20 bg-[var(--warning-muted)] p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-semibold text-[var(--warning)]">{count} details still needed</p>
+          <p className="mt-1 text-sm text-[var(--warning)]">{exampleText}</p>
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/matters/${matterId}/intake`}>Complete missing information</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ActionEmptyState({ actionHref, actionLabel, description, title }: { actionHref: string; actionLabel: string; description: string; title: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-background p-4">
+      <p className="font-medium text-foreground">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+      <Button asChild className="mt-3" size="sm" variant="outline">
+        <Link href={actionHref}>{actionLabel}</Link>
+      </Button>
+    </div>
+  );
+}
+
+function ActionCallout({ actionHref, actionLabel, description, title }: { actionHref: string; actionLabel: string; description: string; title: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      <p className="font-semibold text-foreground">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+      <Button asChild className="mt-3" size="sm">
+        <Link href={actionHref}>{actionLabel}</Link>
+      </Button>
+    </div>
+  );
+}
+
+function MatterMoreActions({ matter }: { matter: MatterDetail }) {
+  const canShow = (matter.stage !== "closed" && matter.permissions.canClose) || matter.permissions.canArchive || (matter.isArchived && matter.permissions.canRestore);
+  if (!canShow) return null;
+  return (
+    <details className="relative">
+      <summary className="flex h-10 cursor-pointer list-none items-center rounded-lg border border-border px-4 text-sm font-medium text-foreground">
+        More Actions
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 grid min-w-44 gap-2 rounded-lg border border-border bg-popover p-2 shadow-md">
+        {matter.stage !== "closed" && matter.permissions.canClose ? (
+          <form action={submitCloseMatterAction}>
+            <input name="matterId" type="hidden" value={matter.id} />
+            <input name="reason" type="hidden" value="Other" />
+            <input name="closingDate" type="hidden" value={new Date().toISOString().slice(0, 10)} />
+            <input name="note" type="hidden" value="Closed from matter detail." />
+            <Button className="w-full justify-start" size="sm" type="submit" variant="ghost">Close Matter</Button>
+          </form>
+        ) : null}
+        {matter.isArchived && matter.permissions.canRestore ? (
+          <form action={submitRestoreMatterAction}>
+            <input name="matterId" type="hidden" value={matter.id} />
+            <Button className="w-full justify-start" size="sm" type="submit" variant="ghost">Restore Matter</Button>
+          </form>
+        ) : matter.permissions.canArchive ? (
+          <form action={submitArchiveMatterAction}>
+            <input name="matterId" type="hidden" value={matter.id} />
+            <Button className="w-full justify-start" size="sm" type="submit" variant="ghost">Archive Matter</Button>
+          </form>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-2">
@@ -564,6 +694,36 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <dl className="divide-y divide-border rounded-lg bg-secondary/60 px-4">{children}</dl>
     </section>
   );
+}
+
+function getMissingMatterDetails(matter: MatterDetail, assignedAttorneyNames: string, assignedStaffNames: string) {
+  const details: string[] = [];
+  if (!matter.assignedAdjusterName) details.push("Adjuster");
+  if (!matter.dateOfLoss) details.push("Date of loss");
+  if (!matter.jurisdiction) details.push("Jurisdiction");
+  if (matter.parties.length === 0) details.push("Responsible party");
+  if (matter.insuranceStatus === "unknown") details.push("Insurance status");
+  if (matter.liabilityAssessment === "unknown") details.push("Liability assessment");
+  if (!matter.carrierSupervisorName) details.push("Carrier supervisor");
+  if (assignedAttorneyNames === "Not assigned") details.push("Lead attorney");
+  if (assignedStaffNames === "Not assigned") details.push("Assigned staff");
+  if (!matter.currentStatusSummary) details.push("Current status");
+  return details;
+}
+
+function getHeaderBadges(matter: MatterDetail) {
+  const badges: Array<{ key: string; node: ReactNode }> = [];
+  if (matter.warnings.includes("deadline_within_30")) badges.push({ key: "critical-deadline", node: <StatusBadge status="Critical deadline" /> });
+  if (matter.warnings.includes("overdue_next_action")) badges.push({ key: "overdue", node: <StatusBadge status="Action overdue" /> });
+  if (matter.warnings.includes("missing_information") || matter.warnings.includes("missing_required_evidence")) badges.push({ key: "missing", node: <StatusBadge status="Missing information" /> });
+  if (matter.warnings.includes("unverified_statute_deadline")) badges.push({ key: "unverified", node: <StatusBadge status="Deadline unverified" /> });
+  if (badges.length === 0) badges.push({ key: "stage", node: <StatusBadge status={matterStageLabels[matter.stage] as MatterStatus} /> });
+  if (matter.intakeStatus !== "complete") badges.push({ key: "intake", node: <StatusBadge status={intakeStatusLabels[matter.intakeStatus] as MatterStatus} /> });
+  return badges;
+}
+
+function isPresent(value: ReactNode | null | undefined) {
+  return value !== null && value !== undefined && value !== "" && value !== "Not assigned" && value !== "Not entered" && value !== "Unknown" && value !== "Not started";
 }
 
 function assignmentNames(assignments: MatterAssignment[], roleNames: string[], fallback?: string | null) {

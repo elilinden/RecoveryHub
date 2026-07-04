@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hasBlockingValidation, resetVerificationOnEmailChange, validateOutboundPackage } from "@/lib/documents-packages/validation";
+import { canApprovePackageForSend, getPackageApprovalBlockers, hasBlockingValidation, resetVerificationOnEmailChange, validateOutboundPackage } from "@/lib/documents-packages/validation";
 import type { MatterDetail } from "@/lib/matters-workspace/types";
 import type { OutboundPackage } from "@/lib/documents-packages/types";
 
@@ -108,6 +108,38 @@ describe("package validation", () => {
     expect(validations.find((validation) => validation.validationKey === "recipient_email_verified")?.status).toBe("failed");
     expect(validations.find((validation) => validation.validationKey === "no_blocked_attachments")?.status).toBe("failed");
     expect(hasBlockingValidation(validations)).toBe(true);
+  });
+
+  it("blocks approved-for-send eligibility when required package integrity is missing", () => {
+    const pkg = packageFixture({
+      coverDocumentId: null,
+      recipients: [],
+      documents: [],
+      validations: [
+        {
+          id: "validation-critical",
+          validationKey: "cover_document_exists",
+          status: "failed",
+          severity: "critical",
+          title: "Cover document exists",
+          description: "Generate or attach the package cover document.",
+          overrideReason: null,
+          resolvedAt: null,
+        },
+      ],
+    });
+
+    expect(canApprovePackageForSend(pkg)).toBe(false);
+    expect(getPackageApprovalBlockers(pkg)).toEqual(expect.arrayContaining([
+      "Add a package recipient.",
+      "Add all required available attachments.",
+      "Generate or attach the required cover document.",
+      "Resolve critical validation failures.",
+    ]));
+  });
+
+  it("allows approval eligibility for a ready package with verified recipient and required documents", () => {
+    expect(canApprovePackageForSend(packageFixture())).toBe(true);
   });
 
   it("resets verification when an email changes", () => {

@@ -1,5 +1,5 @@
 import type { MatterDetail } from "@/lib/matters-workspace/types";
-import type { OutboundPackage, PackageValidation, VerificationStatus } from "@/lib/documents-packages/types";
+import type { OutboundPackage, PackageReview, PackageValidation, VerificationStatus } from "@/lib/documents-packages/types";
 
 export type PackageValidationInput = {
   matter: Pick<MatterDetail, "id" | "stage" | "carrierClaimNumber" | "primaryPartyNames" | "amountSought" | "statuteDeadline" | "statuteDeadlineVerified">;
@@ -77,9 +77,38 @@ export function hasBlockingValidation(validations: PackageValidation[]) {
   return validations.some((validation) => validation.status === "failed" && validation.severity === "critical");
 }
 
+export function getPackageApprovalBlockers(
+  outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations">
+) {
+  const blockers: string[] = [];
+  const primaryRecipient = outboundPackage.recipients.find((recipient) => recipient.isPrimary) ?? outboundPackage.recipients[0];
+  const hasRequiredAttachment = outboundPackage.documents.some((document) => document.isRequired);
+  const hasBlockedAttachment = outboundPackage.documents.some((document) => document.status !== "available" || document.scanStatus === "flagged" || document.scanStatus === "scan_failed");
+  const criticalValidationFailure = outboundPackage.validations.some((validation) => validation.status === "failed" && validation.severity === "critical");
+  const latestAttorneyReview = latestReview(outboundPackage.reviews, "attorney_review");
+
+  if (!primaryRecipient) blockers.push("Add a package recipient.");
+  if (primaryRecipient && primaryRecipient.verificationStatus !== "verified") blockers.push("Verify the recipient email.");
+  if (!hasRequiredAttachment || hasBlockedAttachment) blockers.push("Add all required available attachments.");
+  if (!outboundPackage.coverDocumentId) blockers.push("Generate or attach the required cover document.");
+  if (criticalValidationFailure) blockers.push("Resolve critical validation failures.");
+  if (outboundPackage.status !== "ready_for_review") blockers.push("Submit the package for attorney review.");
+  if (latestAttorneyReview?.decision === "changes_requested" || latestAttorneyReview?.decision === "rejected") blockers.push("Complete the required attorney review.");
+
+  return blockers;
+}
+
+export function canApprovePackageForSend(outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations">) {
+  return getPackageApprovalBlockers(outboundPackage).length === 0;
+}
+
 export function resetVerificationOnEmailChange(previousEmail: string | null, nextEmail: string | null, currentStatus: VerificationStatus): VerificationStatus {
   if ((previousEmail ?? "").trim().toLowerCase() === (nextEmail ?? "").trim().toLowerCase()) return currentStatus;
   return nextEmail ? "verification_required" : "unverified";
+}
+
+function latestReview(reviews: PackageReview[], type: PackageReview["reviewType"]) {
+  return [...reviews].filter((review) => review.reviewType === type).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 function makeValidation(

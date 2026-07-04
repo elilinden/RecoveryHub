@@ -230,6 +230,7 @@ function buildActiveFilterChips(
   const booleanLabels: Array<{ key: keyof MattersQueryState["filters"]; label: string }> = [
     { key: "amountRecovered", label: "Amount recovered" },
     { key: "noAmountSought", label: "No amount sought" },
+    { key: "needsAttention", label: "Needs attention" },
     { key: "overdueNextAction", label: "Overdue next action" },
     { key: "missingNextAction", label: "Missing next action" },
     { key: "draftIntake", label: "Draft intake" },
@@ -237,9 +238,11 @@ function buildActiveFilterChips(
     { key: "awaitingClient", label: "Awaiting client" },
     { key: "closed", label: "Include closed" },
     { key: "archived", label: "Include archived" },
+    { key: "archivedOnly", label: "Archived only" },
     { key: "overdueDeadline", label: "Overdue deadline" },
     { key: "missingStatuteDeadline", label: "Missing statute deadline" },
     { key: "unverifiedDeadline", label: "Unverified statute deadline" },
+    { key: "missingInformation", label: "Missing information" },
     { key: "missingAdjuster", label: "Missing adjuster" },
     { key: "missingResponsibleParty", label: "Missing responsible party" },
     { key: "unknownInsurance", label: "Unknown insurance status" },
@@ -383,6 +386,7 @@ function FilterSheet({
 
           <FilterGroup title="Workflow">
             <SelectField label="Next action" name="nextAction" value={query.filters.nextAction} options={filterOptions.nextActions.map((value) => ({ value, label: value }))} />
+            <CheckboxField checked={query.filters.needsAttention} label="Needs attention" name="needsAttention" />
             <CheckboxField checked={query.filters.overdueNextAction} label="Overdue next action" name="overdueNextAction" />
             <CheckboxField checked={query.filters.missingNextAction} label="Missing next action" name="missingNextAction" />
             <CheckboxField checked={query.filters.draftIntake} label="Draft intake" name="draftIntake" />
@@ -390,6 +394,7 @@ function FilterSheet({
             <CheckboxField checked={query.filters.awaitingClient} label="Awaiting client" name="awaitingClient" />
             <CheckboxField checked={query.filters.closed} label="Include closed" name="closed" />
             <CheckboxField checked={query.filters.archived} label="Include archived" name="archived" />
+            <CheckboxField checked={query.filters.archivedOnly} label="Archived only" name="archivedOnly" />
           </FilterGroup>
 
           <FilterGroup title="Deadlines and Activity">
@@ -402,6 +407,7 @@ function FilterSheet({
           </FilterGroup>
 
           <FilterGroup title="Information Quality">
+            <CheckboxField checked={query.filters.missingInformation} label="Missing information" name="missingInformation" />
             <CheckboxField checked={query.filters.missingAdjuster} label="Missing assigned adjuster" name="missingAdjuster" />
             <CheckboxField checked={query.filters.missingResponsibleParty} label="Missing responsible party" name="missingResponsibleParty" />
             <CheckboxField checked={query.filters.unknownInsurance} label="Unknown insurance status" name="unknownInsurance" />

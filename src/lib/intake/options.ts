@@ -72,15 +72,18 @@ const developmentOptions: IntakeOptions = {
   permission: {
     canCreateMatter: true,
     canVerifyDeadline: true,
+    canAddCarrier: true,
     canAddCarrierContact: true,
   },
 };
 
 function getRolePermissions(role?: IntakeUser["role"]) {
+  const canCreateMatter = role ? ["admin", "partner", "attorney", "staff"].includes(role) : false;
   return {
-    canCreateMatter: role ? ["admin", "partner", "attorney", "staff"].includes(role) : false,
+    canCreateMatter,
     canVerifyDeadline: role ? ["admin", "partner", "attorney"].includes(role) : false,
-    canAddCarrierContact: role ? ["admin", "partner", "attorney", "staff"].includes(role) : false,
+    canAddCarrier: canCreateMatter,
+    canAddCarrierContact: canCreateMatter,
   };
 }
 

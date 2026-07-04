@@ -55,6 +55,40 @@ describe("matters workspace query", () => {
     expect(applied.page).toBe(2);
   });
 
+  it("ignores unknown saved view ids so stale links do not behave like active filters", () => {
+    const query = parseMattersQuery(new URLSearchParams("view=my-tasks&page=2"));
+    const applied = applySavedView(query, systemSavedViews);
+
+    expect(applied.view).toBe("");
+    expect(applied.page).toBe(2);
+    expect(countActiveFilters(applied)).toBe(0);
+  });
+
+  it("filters broad needs-attention dashboard links without requiring every issue at once", () => {
+    const query = parseMattersQuery(new URLSearchParams("needsAttention=1"));
+    const results = filterMatterItems(developmentMatterItems, query, new Date("2026-07-03T12:00:00.000Z"));
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((matter) => matter.warnings.length > 0 || matter.priority === "urgent" || matter.priority === "high")).toBe(true);
+  });
+
+  it("filters broad missing-information views without requiring every missing field at once", () => {
+    const query = parseMattersQuery(new URLSearchParams("missingInformation=1"));
+    const results = filterMatterItems(developmentMatterItems, query, new Date("2026-07-03T12:00:00.000Z"));
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((matter) => matter.warnings.includes("missing_information") || matter.warnings.includes("missing_required_evidence"))).toBe(true);
+  });
+
+  it("can show archived matters only", () => {
+    const archivedMatter = { ...developmentMatterItems[0], id: "archived-matter", isArchived: true };
+    const query = parseMattersQuery(new URLSearchParams("archivedOnly=1"));
+    const results = filterMatterItems([...developmentMatterItems, archivedMatter], query, new Date("2026-07-03T12:00:00.000Z"));
+
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("archived-matter");
+  });
+
   it("hides internal notes from billing development profile", () => {
     const detail = getDevelopmentMatterDetail("northstar-collins-claim", {
       id: "billing-profile",

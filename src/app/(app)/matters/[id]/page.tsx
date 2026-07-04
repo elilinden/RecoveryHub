@@ -11,7 +11,7 @@ import { StatusBadgeList } from "@/components/common/status-badge-list";
 import { AddMatterEventForm } from "@/components/matters/add-matter-event-form";
 import { EditCurrentStatusSheet } from "@/components/matters/edit-current-status-sheet";
 import { MatterDetailWorkspace, type MatterWorkTab } from "@/components/matters/matter-detail-workspace";
-import { DateField, MoneyField, SelectField, TextField } from "@/components/matters/matter-form-fields";
+import { DateField, MoneyField, SelectField, TextAreaField, TextField } from "@/components/matters/matter-form-fields";
 import { MatterSummaryStrip } from "@/components/matters/matter-summary-strip";
 import { MatterTimeline } from "@/components/matters/matter-timeline";
 import { MatterDocumentsPackagesPanel } from "@/components/documents-packages/matter-documents-packages-panel";
@@ -225,14 +225,14 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             <CardContent className="space-y-4 p-6">
               <SectionHeader title="Tasks" />
               {matter.tasks.map((task) => (
-                <form action={submitUpsertTaskAction} className="grid min-w-0 gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1.15fr)_minmax(8rem,0.55fr)_minmax(9rem,0.55fr)_minmax(8rem,0.55fr)_minmax(0,1.1fr)_auto]" key={task.id}>
+                <form action={submitUpsertTaskAction} className="grid min-w-0 gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-4" key={task.id}>
                   <input name="matterId" type="hidden" value={matter.id} />
                   <input name="taskId" type="hidden" value={task.id} />
-                  <TextField label="Title" name="title" value={task.title} />
+                  <TextAreaField className="md:col-span-2" label="Title" name="title" value={task.title} />
                   <SelectField label="Priority" name="priority" options={Object.entries(priorityLabels)} value={task.priority} />
                   <DateField label="Due date" name="dueDate" value={task.dueDate ?? ""} />
                   <SelectField label="Status" name="status" options={Object.entries(taskStatusLabels)} value={task.status} />
-                  <TextField label="Description" name="description" value={task.description ?? ""} />
+                  <TextAreaField className="md:col-span-2 xl:col-span-3" label="Description" name="description" rows={3} value={task.description ?? ""} />
                   {matter.permissions.canManageTasks ? (
                     <Button className="self-end justify-self-start xl:justify-self-end" type="submit" variant="outline">
                       Save
@@ -242,9 +242,9 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
               ))}
               {matter.tasks.length === 0 ? <p className="text-sm text-muted-foreground">No tasks recorded yet.</p> : null}
               {matter.permissions.canManageTasks ? (
-                <form action={submitUpsertTaskAction} className="grid min-w-0 gap-3 rounded-lg border border-dashed border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.5fr)_minmax(9rem,0.5fr)_minmax(8rem,0.5fr)_auto]">
+                <form action={submitUpsertTaskAction} className="grid min-w-0 gap-3 rounded-lg border border-dashed border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-4">
                   <input name="matterId" type="hidden" value={matter.id} />
-                  <TextField label="Title" name="title" value="" />
+                  <TextAreaField className="md:col-span-2" label="Title" name="title" value="" />
                   <SelectField label="Priority" name="priority" options={Object.entries(priorityLabels)} value="normal" />
                   <DateField label="Due date" name="dueDate" value="" />
                   <SelectField label="Status" name="status" options={Object.entries(taskStatusLabels)} value="not_started" />
@@ -260,14 +260,14 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             <CardContent className="space-y-4 p-6">
               <SectionHeader title="Deadlines" />
               {matter.deadlines.map((deadline) => (
-                <form action={submitUpsertDeadlineAction} className="grid min-w-0 gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1.15fr)_minmax(8rem,0.55fr)_minmax(9rem,0.55fr)_minmax(9rem,0.55fr)_minmax(0,1fr)_auto]" key={deadline.id}>
+                <form action={submitUpsertDeadlineAction} className="grid min-w-0 gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-4" key={deadline.id}>
                   <input name="matterId" type="hidden" value={matter.id} />
                   <input name="deadlineId" type="hidden" value={deadline.id} />
-                  <TextField label="Title" name="title" value={deadline.title} />
+                  <TextAreaField className="md:col-span-2" label="Title" name="title" value={deadline.title} />
                   <SelectField label="Type" name="deadlineType" options={Object.entries(deadlineTypeLabels)} value={deadline.deadlineType} />
                   <DateField label="Date" name="deadlineDate" value={deadline.deadlineDate} />
                   <DateField label="Reminder" name="reminderDate" value={deadline.reminderDate ?? ""} />
-                  <TextField label="Notes" name="notes" value={deadline.notes ?? ""} />
+                  <TextAreaField className="md:col-span-2 xl:col-span-3" label="Notes" name="notes" rows={3} value={deadline.notes ?? ""} />
                   <div className="min-w-0 self-end space-y-2 justify-self-start xl:justify-self-end">
                     {matter.permissions.canVerifyDeadlines ? (
                       <label className="flex items-center gap-2 text-xs">
@@ -284,12 +284,12 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
               ))}
               {matter.deadlines.length === 0 ? <p className="text-sm text-muted-foreground">No deadlines recorded yet.</p> : null}
               {matter.permissions.canManageDeadlines ? (
-                <form action={submitUpsertDeadlineAction} className="grid min-w-0 gap-3 rounded-lg border border-dashed border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(8rem,0.5fr)_minmax(9rem,0.5fr)_minmax(0,1fr)_auto]">
+                <form action={submitUpsertDeadlineAction} className="grid min-w-0 gap-3 rounded-lg border border-dashed border-border bg-background p-4 md:grid-cols-2 xl:grid-cols-4">
                   <input name="matterId" type="hidden" value={matter.id} />
-                  <TextField label="Title" name="title" value="" />
+                  <TextAreaField className="md:col-span-2" label="Title" name="title" value="" />
                   <SelectField label="Type" name="deadlineType" options={Object.entries(deadlineTypeLabels)} value="other" />
                   <DateField label="Date" name="deadlineDate" value="" />
-                  <TextField label="Notes" name="notes" value="" />
+                  <TextAreaField className="md:col-span-2 xl:col-span-3" label="Notes" name="notes" rows={3} value="" />
                   <Button className="self-end justify-self-start xl:justify-self-end" type="submit">
                     Add Deadline
                   </Button>

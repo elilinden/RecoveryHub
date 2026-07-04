@@ -3,6 +3,7 @@ import type { Profile } from "@/lib/data/profiles";
 import { loadMatterDetail, loadMattersWorkspace } from "@/lib/matters-workspace/data";
 import type { DeadlineItem, MatterDetail, TaskItem, TimelineItem } from "@/lib/matters-workspace/types";
 import { developmentMatterItems, getDevelopmentMatterDetail } from "@/lib/matters-workspace/mock";
+import { dashboardMatterLinks } from "@/lib/matters-workspace/links";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { compareMatterTriage, evaluateMatterTriage, getPrimaryTriageFlag, isSnoozed } from "@/lib/triage/rules";
 import { loadActiveMatterFlags, loadTriageSettings } from "@/lib/triage/data";
@@ -235,7 +236,7 @@ function buildSummaryMetrics(input: {
       title: "Needs Follow-Up",
       count: input.needsFollowUp.length,
       description: "Overdue actions, stale files, or outside responses past follow-up.",
-      href: "/matters?view=needs-follow-up",
+      href: dashboardMatterLinks.followUp,
       trend: overdueActions > 0 ? `${overdueActions} overdue next ${overdueActions === 1 ? "action" : "actions"}` : "No overdue next actions",
       tone: input.needsFollowUp.some((matter) => matter.primaryFlag?.severity === "critical") ? "urgent" : "warning",
     },
@@ -243,7 +244,7 @@ function buildSummaryMetrics(input: {
       title: "Missing Information",
       count: input.missingInformation.length,
       description: "Material information gaps that can slow recovery work.",
-      href: "/matters?view=missing-information",
+      href: dashboardMatterLinks.missingInformation,
       trend: `${input.missingInformation.filter((matter) => matter.primaryFlag?.severity === "high").length} high-priority gaps`,
       tone: "warning",
     },
@@ -251,7 +252,7 @@ function buildSummaryMetrics(input: {
       title: "Upcoming Deadlines",
       count: input.upcomingDeadlineMatters.length,
       description: "Recorded deadlines that are overdue, urgent, upcoming, or unverified.",
-      href: "/matters?view=upcoming-deadlines",
+      href: dashboardMatterLinks.deadlines,
       trend: urgentDeadlines > 0 ? `${urgentDeadlines} urgent or overdue` : "No urgent legal deadlines",
       tone: urgentDeadlines > 0 ? "urgent" : "neutral",
     },
@@ -259,7 +260,7 @@ function buildSummaryMetrics(input: {
       title: "Ready for Demand",
       count: input.readyForDemand.length,
       description: "Appears ready for attorney confirmation before demand preparation.",
-      href: "/matters?view=ready-for-demand",
+      href: dashboardMatterLinks.readyForDemand,
       trend: "Requires human confirmation",
       tone: "success",
     },
@@ -267,7 +268,7 @@ function buildSummaryMetrics(input: {
       title: "New Referrals",
       count: newReferrals,
       description: "Recent or aged referrals that still need review or intake completion.",
-      href: "/matters?view=new-referrals",
+      href: dashboardMatterLinks.newReferrals,
       trend: input.myTasks.length > 0 ? `${input.myTasks.length} tasks due soon` : "No tasks due soon",
       tone: "neutral",
     },

@@ -180,7 +180,8 @@ export async function loadMattersWorkspace(input: {
   const supabase = await createClient();
   let matterQuery = supabase.from("matters").select("*", { count: "exact" });
 
-  if (!query.filters.archived) matterQuery = matterQuery.eq("is_archived", false);
+  if (query.filters.archivedOnly) matterQuery = matterQuery.eq("is_archived", true);
+  else if (!query.filters.archived) matterQuery = matterQuery.eq("is_archived", false);
   if (!query.filters.closed) matterQuery = matterQuery.neq("stage", "closed");
   if (query.filters.carrier) matterQuery = matterQuery.eq("carrier_id", query.filters.carrier);
   if (query.filters.adjuster) matterQuery = matterQuery.eq("assigned_adjuster_id", query.filters.adjuster);
@@ -196,6 +197,21 @@ export async function loadMattersWorkspace(input: {
   if (query.filters.amountRecovered) matterQuery = matterQuery.gt("amount_recovered", 0);
   if (query.filters.noAmountSought) matterQuery = matterQuery.eq("amount_sought", "0");
   if (query.filters.nextAction) matterQuery = matterQuery.eq("next_action", query.filters.nextAction);
+  if (query.filters.needsAttention) {
+    matterQuery = matterQuery.or(
+      [
+        `next_action_due_date.lt.${today()}`,
+        "next_action.is.null",
+        `statute_deadline.lte.${addDays(30)}`,
+        "statute_deadline_verified.eq.false",
+        `last_substantive_activity_at.lt.${addDays(-30)}`,
+        "priority.in.(urgent,high)",
+        "assigned_adjuster_id.is.null",
+        "insurance_status.eq.unknown",
+        "liability_assessment.eq.unknown",
+      ].join(",")
+    );
+  }
   if (query.filters.overdueNextAction) matterQuery = matterQuery.lt("next_action_due_date", today());
   if (query.filters.missingNextAction) matterQuery = matterQuery.is("next_action", null);
   if (query.filters.draftIntake) matterQuery = matterQuery.neq("intake_status", "complete");
@@ -204,6 +220,9 @@ export async function loadMattersWorkspace(input: {
   if (query.filters.missingStatuteDeadline) matterQuery = matterQuery.is("statute_deadline", null);
   if (query.filters.unverifiedDeadline) matterQuery = matterQuery.eq("statute_deadline_verified", false);
   if (query.filters.deadlineWindow) matterQuery = matterQuery.lte("statute_deadline", addDays(Number(query.filters.deadlineWindow)));
+  if (query.filters.missingInformation) {
+    matterQuery = matterQuery.or("assigned_adjuster_id.is.null,insurance_status.eq.unknown,liability_assessment.eq.unknown");
+  }
   if (query.filters.unknownInsurance) matterQuery = matterQuery.eq("insurance_status", "unknown");
   if (query.filters.unknownLiability) matterQuery = matterQuery.eq("liability_assessment", "unknown");
   if (query.q) {

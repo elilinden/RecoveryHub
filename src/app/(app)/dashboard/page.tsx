@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireActiveProfile } from "@/lib/auth/session";
 import { loadDashboardData, type DashboardMatter } from "@/lib/dashboard/data";
+import { dashboardMatterLinks } from "@/lib/matters-workspace/links";
 import { taskStatusLabels } from "@/lib/matters-workspace/labels";
 import { submitRefreshDashboardTriageAction } from "@/lib/triage/actions";
 import { cn } from "@/lib/utils";
@@ -68,10 +69,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Today at a glance">
-        <TodayMetric count={urgentMatters.length} href="/matters?view=needs-follow-up" label="Urgent matters" tone="urgent" />
-        <TodayMetric count={dashboard.myTasks.length} href="/matters?view=my-tasks" label="Tasks due" tone="neutral" />
-        <TodayMetric count={dashboard.upcomingDeadlines.length} href="/matters?view=upcoming-deadlines" label="Deadlines approaching" tone="warning" />
-        <TodayMetric count={dashboard.readyForDemand.length} href="/matters?view=ready-for-demand" label="Ready for demand" tone="success" />
+        <TodayMetric count={urgentMatters.length} href={dashboardMatterLinks.urgent} label="Urgent matters" tone="urgent" />
+        <TodayMetric count={dashboard.myTasks.length} href={dashboardMatterLinks.tasks} label="Tasks due" tone="neutral" />
+        <TodayMetric count={dashboard.upcomingDeadlines.length} href={dashboardMatterLinks.deadlines} label="Deadlines approaching" tone="warning" />
+        <TodayMetric count={dashboard.readyForDemand.length} href={dashboardMatterLinks.readyForDemand} label="Ready for demand" tone="success" />
       </section>
 
       <Card className="border-border bg-card shadow-sm">
@@ -100,7 +101,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               {urgentMatters.length > 0 ? (
                 <>
                   {urgentMatters.slice(0, 5).map((matter) => <UrgentMatterRow key={matter.snapshot.id} matter={matter} />)}
-                  <ViewAllLink count={urgentMatters.length} href="/matters?view=needs-follow-up" label="urgent matters" />
+                  <ViewAllLink count={urgentMatters.length} href={dashboardMatterLinks.urgent} label="urgent matters" />
                 </>
               ) : (
                 <InlineEmpty description="No overdue actions, urgent deadlines, or missing information right now." title="Nothing urgent" />
@@ -119,7 +120,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       title={`${task.title} · ${task.matterName}`}
                     />
                   ))}
-                  <ViewAllLink count={dashboard.myTasks.length} href="/matters?view=my-tasks" label="tasks" />
+                  <ViewAllLink count={dashboard.myTasks.length} href={dashboardMatterLinks.tasks} label="tasks" />
                 </>
               ) : (
                 <InlineEmpty description="You have no overdue tasks or tasks due soon." title="You are caught up" />
@@ -138,7 +139,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       title={`${deadline.title} · ${deadline.matterName}`}
                     />
                   ))}
-                  <ViewAllLink count={dashboard.upcomingDeadlines.length} href="/matters?view=upcoming-deadlines" label="deadlines" />
+                  <ViewAllLink count={dashboard.upcomingDeadlines.length} href={dashboardMatterLinks.deadlines} label="deadlines" />
                 </>
               ) : (
                 <InlineEmpty description="No recorded deadlines fall within the tracked window." title="No deadlines approaching" />
@@ -157,7 +158,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
                     />
                   ))}
-                  <ViewAllLink count={dashboard.needsFollowUp.length} href="/matters?view=needs-follow-up" label="follow-up matters" />
+                  <ViewAllLink count={dashboard.needsFollowUp.length} href={dashboardMatterLinks.followUp} label="follow-up matters" />
                 </>
               ) : (
                 <InlineEmpty description="No matters are waiting on a response or stuck without a next action." title="Nothing waiting on follow-up" />
@@ -399,10 +400,10 @@ function MiniField({ label, value }: { label: string; value: ReactNode }) {
 
 function CompactRow({ title, meta, href, right }: { title: string; meta: string; href: string; right?: ReactNode }) {
   return (
-    <Link className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 sm:flex-row sm:items-center sm:justify-between" href={href}>
-      <span className="min-w-0">
-        <span className="block font-medium text-foreground">{title}</span>
-        <span className="mt-1 block text-sm leading-5 text-muted-foreground">{meta}</span>
+    <Link className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:border-primary/30 sm:flex-row sm:items-center sm:justify-between" href={href}>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium leading-5 text-foreground [overflow-wrap:anywhere]">{title}</span>
+        <span className="mt-1 block text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">{meta}</span>
       </span>
       {right ? <span className="shrink-0 text-sm text-muted-foreground">{right}</span> : null}
     </Link>

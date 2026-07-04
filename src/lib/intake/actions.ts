@@ -36,6 +36,22 @@ export type DuplicateMatterMatch = {
   status: "draft" | "in_progress" | "complete";
 };
 
+type CancelIntakeMode = "archive" | "delete";
+
+export type AddCarrierResult =
+  | {
+      ok: true;
+      carrier: {
+        id: string;
+        name: string;
+        shortName: string | null;
+      };
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
 function canCreateMatter(role: ProfileRole) {
   return ["admin", "partner", "attorney", "staff"].includes(role);
 }
@@ -574,6 +590,83 @@ export async function addCarrierContactAction(input: {
   return { ok: true, contactId: String(data.id) };
 }
 
+export async function addCarrierAction(input: {
+  name: string;
+  shortName?: string;
+}): Promise<AddCarrierResult> {
+  const name = input.name.trim();
+  const shortName = input.shortName?.trim() ?? "";
+
+  if (name.length < 2) {
+    return { ok: false, message: "Enter the carrier name." };
+  }
+
+  if (!isSupabaseConfigured()) {
+    return {
+      ok: true,
+      carrier: {
+        id: `development-carrier-${Date.now()}`,
+        name,
+        shortName: shortName || null,
+      },
+    };
+  }
+
+  const permission = await requireIntakePermission();
+  if (!permission.ok) {
+    return permission;
+  }
+
+  const options = await getIntakeOptions();
+  if (!options.permission.canAddCarrier) {
+    return { ok: false, message: "You do not have permission to add carriers." };
+  }
+
+  const supabase = await createClient();
+  const { data: existingCarrier } = await supabase
+    .from("carriers")
+    .select("id,name,short_name")
+    .eq("is_active", true)
+    .ilike("name", name)
+    .maybeSingle();
+
+  if (existingCarrier) {
+    return {
+      ok: true,
+      carrier: {
+        id: String(existingCarrier.id),
+        name: String(existingCarrier.name),
+        shortName: existingCarrier.short_name ? String(existingCarrier.short_name) : null,
+      },
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("carriers")
+    .insert({
+      name,
+      short_name: shortName || null,
+      is_active: true,
+    })
+    .select("id,name,short_name")
+    .single();
+
+  if (error || !data) {
+    return { ok: false, message: "We could not add this carrier." };
+  }
+
+  revalidatePath("/matters/new");
+
+  return {
+    ok: true,
+    carrier: {
+      id: String(data.id),
+      name: String(data.name),
+      shortName: data.short_name ? String(data.short_name) : null,
+    },
+  };
+}
+
 export async function getIntakeDraft(matterId: string): Promise<IntakeFormData | null> {
   if (!isSupabaseConfigured()) {
     return null;
@@ -587,9 +680,17 @@ export async function getIntakeDraft(matterId: string): Promise<IntakeFormData |
   return parsed.success ? parsed.data : null;
 }
 
-export async function cancelIntakeAction(matterId?: string): Promise<IntakeActionResult> {
+export async function cancelIntakeAction(input?: { matterId?: string; mode?: CancelIntakeMode }): Promise<IntakeActionResult> {
+  const matterId = input?.matterId;
+  const mode = input?.mode ?? "archive";
   if (!matterId || !isSupabaseConfigured()) {
-    return { ok: true, matterId: matterId ?? "development-intake-draft", savedAt: new Date().toISOString(), redirectTo: "/matters" };
+    return {
+      ok: true,
+      matterId: matterId ?? "development-intake-draft",
+      savedAt: new Date().toISOString(),
+      redirectTo: "/matters",
+      message: mode === "delete" ? "Draft deleted." : "Draft preserved and archived.",
+    };
   }
 
   const permission = await requireIntakePermission();
@@ -598,9 +699,46 @@ export async function cancelIntakeAction(matterId?: string): Promise<IntakeActio
   }
 
   const supabase = await createClient();
+  const { data: matter, error: matterError } = await supabase
+    .from("matters")
+    .select("id,intake_status")
+    .eq("id", matterId)
+    .maybeSingle();
+
+  if (matterError || !matter) {
+    return { ok: false, message: "We could not find this intake draft." };
+  }
+
+  if (matter.intake_status === "complete") {
+    return { ok: false, message: "Completed matters cannot be deleted from intake cancellation." };
+  }
+
+  if (mode === "delete") {
+    const relatedDeletes = await Promise.all([
+      supabase.from("activity_logs").delete().eq("matter_id", matterId),
+      supabase.from("matter_assignments").delete().eq("matter_id", matterId),
+      supabase.from("evidence_items").delete().eq("matter_id", matterId),
+      supabase.from("matter_parties").delete().eq("matter_id", matterId),
+      supabase.from("deadlines").delete().eq("matter_id", matterId),
+      supabase.from("tasks").delete().eq("matter_id", matterId),
+      supabase.from("matter_events").delete().eq("matter_id", matterId),
+    ]);
+    const relatedError = relatedDeletes.find((result) => result.error)?.error;
+    if (relatedError) {
+      return { ok: false, message: "We could not delete this intake draft." };
+    }
+
+    const { error } = await supabase.from("matters").delete().eq("id", matterId);
+    if (error) {
+      return { ok: false, message: "We could not delete this intake draft." };
+    }
+
+    return { ok: true, matterId, savedAt: new Date().toISOString(), redirectTo: "/matters", message: "Draft deleted." };
+  }
+
   const { error } = await supabase
     .from("matters")
-    .update({ is_archived: true, intake_status: "draft" })
+    .update({ is_archived: true, intake_status: "draft", archived_at: new Date().toISOString(), archived_by: permission.profile.id })
     .eq("id", matterId)
     .select("id")
     .single();

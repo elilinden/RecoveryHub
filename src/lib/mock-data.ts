@@ -1,11 +1,12 @@
 import type { ActivityItem, Matter, QueueItem, SavedView, SummaryMetric } from "@/lib/types";
+import { dashboardMatterLinks } from "@/lib/matters-workspace/links";
 
 export const summaryMetrics: SummaryMetric[] = [
   {
     title: "New Referrals",
     count: 8,
     description: "Need initial review and routing.",
-    href: "/matters?view=new-referrals",
+    href: dashboardMatterLinks.newReferrals,
     trend: "3 added this week",
     tone: "neutral",
   },
@@ -13,7 +14,7 @@ export const summaryMetrics: SummaryMetric[] = [
     title: "Missing Information",
     count: 12,
     description: "Waiting on documents or claim details.",
-    href: "/matters?view=missing-information",
+    href: dashboardMatterLinks.missingInformation,
     trend: "4 can move with one request",
     tone: "warning",
   },
@@ -21,7 +22,7 @@ export const summaryMetrics: SummaryMetric[] = [
     title: "Upcoming Deadlines",
     count: 6,
     description: "Require action in the next 14 days.",
-    href: "/matters?view=upcoming-deadlines",
+    href: dashboardMatterLinks.deadlines,
     trend: "2 due this week",
     tone: "urgent",
   },
@@ -29,7 +30,7 @@ export const summaryMetrics: SummaryMetric[] = [
     title: "Ready for Demand",
     count: 9,
     description: "Complete enough for demand preparation.",
-    href: "/matters?view=ready-for-demand",
+    href: dashboardMatterLinks.readyForDemand,
     trend: "5 over $25k",
     tone: "success",
   },
@@ -37,7 +38,7 @@ export const summaryMetrics: SummaryMetric[] = [
     title: "Needs Follow-Up",
     count: 7,
     description: "Overdue, stale, missing, or waiting beyond follow-up.",
-    href: "/matters?view=needs-follow-up",
+    href: dashboardMatterLinks.followUp,
     trend: "3 are overdue actions",
     tone: "warning",
   },

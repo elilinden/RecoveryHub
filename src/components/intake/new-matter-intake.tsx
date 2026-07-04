@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  addCarrierAction,
   addCarrierContactAction,
   cancelIntakeAction,
   checkDuplicateMattersAction,
@@ -47,7 +48,7 @@ import {
   yesNoUnknownOptions,
   type IntakeFormData,
 } from "@/lib/intake/schema";
-import { filterContactsByCarrier, type IntakeCarrierContact, type IntakeOptions, type IntakeUser } from "@/lib/intake/types";
+import { filterContactsByCarrier, type IntakeCarrier, type IntakeCarrierContact, type IntakeOptions, type IntakeUser } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
 
 type NewMatterIntakeProps = {
@@ -129,6 +130,12 @@ function mergeCarrierContacts(incoming: IntakeCarrierContact[], existing: Intake
   return Array.from(contacts.values()).sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
+function mergeCarriers(incoming: IntakeCarrier[], existing: IntakeCarrier[]) {
+  const carriers = new Map(existing.map((carrier) => [carrier.id, carrier]));
+  incoming.forEach((carrier) => carriers.set(carrier.id, carrier));
+  return Array.from(carriers.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function normalizeIntakeData(input?: Partial<IntakeFormData> | null): IntakeFormData {
   const empty = createEmptyIntake();
   if (!input) return empty;
@@ -196,14 +203,23 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   const [cancelOpen, setCancelOpen] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(() => Boolean(initialMatterId ?? initialData?.id));
   const [dirty, setDirty] = useState(false);
+  const [addedCarriers, setAddedCarriers] = useState<IntakeCarrier[]>([]);
   const [addedCarrierContacts, setAddedCarrierContacts] = useState<IntakeCarrierContact[]>([]);
   const pendingAutosave = useRef(false);
 
-  const carrierContacts = useMemo(
-    () => mergeCarrierContacts(addedCarrierContacts, options.carrierContacts),
-    [addedCarrierContacts, options.carrierContacts]
+  const carriers = useMemo(
+    () => mergeCarriers(addedCarriers, options.carriers),
+    [addedCarriers, options.carriers]
   );
-  const selectedCarrier = options.carriers.find((carrier) => carrier.id === data.stepOne.carrierId);
+  const intakeOptions = useMemo(
+    () => ({ ...options, carriers }),
+    [carriers, options]
+  );
+  const carrierContacts = useMemo(
+    () => mergeCarrierContacts(addedCarrierContacts, intakeOptions.carrierContacts),
+    [addedCarrierContacts, intakeOptions.carrierContacts]
+  );
+  const selectedCarrier = carriers.find((carrier) => carrier.id === data.stepOne.carrierId);
   const adjusters = useMemo(
     () => filterContactsByCarrier(carrierContacts, data.stepOne.carrierId, "adjuster"),
     [carrierContacts, data.stepOne.carrierId]
@@ -362,8 +378,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
     }
   }
 
-  async function cancelIntake() {
-    const result = await cancelIntakeAction(matterId || undefined);
+  async function cancelIntake(mode: "archive" | "delete") {
+    const result = await cancelIntakeAction({ matterId: matterId || undefined, mode });
     if (result.ok && result.redirectTo) {
       window.localStorage.removeItem(localStorageKey);
       router.push(result.redirectTo);
@@ -395,6 +411,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
         ],
       },
     }));
+    setHasInteracted(true);
+    setDirty(true);
   }
 
   function updateParty(index: number, key: string, value: string | boolean) {
@@ -407,6 +425,29 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
         ),
       },
     }));
+    setHasInteracted(true);
+    setDirty(true);
+  }
+
+  function removeParty(index: number) {
+    setData((current) => {
+      const removedParty = current.stepTwo.parties[index];
+      const parties = current.stepTwo.parties.filter((_, partyIndex) => partyIndex !== index);
+      const nextParties =
+        removedParty?.isPrimary && parties.length > 0 && !parties.some((party) => party.isPrimary)
+          ? parties.map((party, partyIndex) => (partyIndex === 0 ? { ...party, isPrimary: true } : party))
+          : parties;
+
+      return {
+        ...current,
+        stepTwo: {
+          ...current.stepTwo,
+          parties: nextParties,
+        },
+      };
+    });
+    setHasInteracted(true);
+    setDirty(true);
   }
 
   function updateEvidence(index: number, key: string, value: string) {
@@ -499,10 +540,14 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                     adjusters={adjusters}
                     data={data}
                     errors={fieldErrors}
-                    options={options}
+                    options={intakeOptions}
                     selectedAdjuster={assignedAdjuster}
                     selectedCarrier={selectedCarrier}
                     supervisors={supervisors}
+                    onCarrierAdded={(carrier) => {
+                      setAddedCarriers((current) => mergeCarriers([carrier], current));
+                      updateStepOne("carrierId", carrier.id);
+                    }}
                     onCarrierContactAdded={(contact) => setAddedCarrierContacts((current) => mergeCarrierContacts([contact], current))}
                     update={updateStepOne}
                   />
@@ -511,10 +556,11 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                   <RecoveryDetailsStep
                     data={data}
                     errors={fieldErrors}
-                    options={options}
+                    options={intakeOptions}
                     suggestedAmount={suggestedAmount}
                     addEvidence={addEvidenceItem}
                     removeEvidence={removeEvidenceItem}
+                    removeParty={removeParty}
                     updateEvidence={updateEvidence}
                     updateParty={updateParty}
                     updateStepTwo={updateStepTwo}
@@ -527,7 +573,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                     data={data}
                     errors={fieldErrors}
                     issueGroups={issueGroups}
-                    options={options}
+                    options={intakeOptions}
                     unresolvedIssues={hasInteracted ? unresolvedIssues : []}
                     update={updateStepThree}
                   />
@@ -551,15 +597,18 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                   <DialogHeader>
                     <DialogTitle>Cancel intake?</DialogTitle>
                     <DialogDescription>
-                      The draft will be preserved and archived when possible. It will not be permanently deleted.
+                      Archive keeps the draft available from Matters filters. Delete permanently removes this draft when it has been saved.
                     </DialogDescription>
                   </DialogHeader>
                   <DialogFooter>
                     <Button type="button" variant="outline" onClick={() => setCancelOpen(false)}>
                       Keep editing
                     </Button>
-                    <Button type="button" onClick={cancelIntake}>
-                      Preserve draft and exit
+                    <Button type="button" variant="outline" onClick={() => cancelIntake("archive")}>
+                      Archive draft
+                    </Button>
+                    <Button type="button" variant="destructive" onClick={() => cancelIntake("delete")}>
+                      Delete draft
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -587,7 +636,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                   Continue
                 </Button>
               ) : (
-                <Button disabled={isPending || !options.permission.canCreateMatter || issueGroups.required.length > 0} type="button" onClick={completeIntake}>
+                <Button disabled={isPending || !intakeOptions.permission.canCreateMatter || issueGroups.required.length > 0} type="button" onClick={completeIntake}>
                   Complete Intake
                 </Button>
               )}
@@ -598,7 +647,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
         <IntakeSummary
           data={data}
           hasInteracted={hasInteracted}
-          options={options}
+          options={intakeOptions}
           selectedAdjuster={assignedAdjuster}
           selectedCarrier={selectedCarrier}
           unresolvedIssues={unresolvedIssues}
@@ -663,10 +712,11 @@ function MatterDetailsStep(props: {
   selectedAdjuster?: IntakeCarrierContact;
   adjusters: IntakeCarrierContact[];
   supervisors: IntakeCarrierContact[];
+  onCarrierAdded: (carrier: IntakeCarrier) => void;
   onCarrierContactAdded: (contact: IntakeCarrierContact) => void;
   update: <K extends keyof IntakeFormData["stepOne"]>(key: K, value: IntakeFormData["stepOne"][K]) => void;
 }) {
-  const { data, errors, options, selectedAdjuster, adjusters, supervisors, onCarrierContactAdded, update } = props;
+  const { data, errors, options, selectedAdjuster, adjusters, supervisors, onCarrierAdded, onCarrierContactAdded, update } = props;
   const attorneys = options.users.filter((user) => ["admin", "partner", "attorney"].includes(user.role));
   const staff = options.users.filter((user) => user.role === "staff");
   const responsibleUsers = options.users.filter((user) => ["admin", "partner", "attorney", "staff"].includes(user.role));
@@ -701,14 +751,21 @@ function MatterDetailsStep(props: {
         <h3 className="text-lg font-semibold text-foreground">Referral Information</h3>
         <div className="grid gap-4 md:grid-cols-2">
           <Field error={errors.carrierId} required label="Carrier">
-            <select className={selectClass(errors.carrierId)} value={data.stepOne.carrierId} onChange={(event) => update("carrierId", event.target.value)}>
-              <option value="">Select carrier</option>
-              {options.carriers.map((carrier) => (
-                <option key={carrier.id} value={carrier.id}>
-                  {carrier.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <select className={cn(selectClass(errors.carrierId), "sm:flex-1")} value={data.stepOne.carrierId} onChange={(event) => update("carrierId", event.target.value)}>
+                <option value="">Select carrier</option>
+                {options.carriers.map((carrier) => (
+                  <option key={carrier.id} value={carrier.id}>
+                    {carrier.name}
+                  </option>
+                ))}
+              </select>
+              <AddCarrierDialog
+                buttonClassName="h-10 shrink-0 gap-2"
+                disabled={!options.permission.canAddCarrier}
+                onCarrierAdded={onCarrierAdded}
+              />
+            </div>
           </Field>
           <Field error={errors.carrierClaimNumber} required label="Carrier claim number">
             <Input className={inputClass(errors.carrierClaimNumber)} value={data.stepOne.carrierClaimNumber} onChange={(event) => update("carrierClaimNumber", event.target.value)} />
@@ -930,6 +987,83 @@ function UserMultiSelect({
   );
 }
 
+function AddCarrierDialog({
+  buttonClassName,
+  disabled,
+  onCarrierAdded,
+}: {
+  buttonClassName?: string;
+  disabled: boolean;
+  onCarrierAdded: (carrier: IntakeCarrier) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [shortName, setShortName] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const [message, setMessage] = useState<string | undefined>();
+
+  function reset() {
+    setName("");
+    setShortName("");
+    setMessage(undefined);
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) reset();
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button className={cn("gap-2", buttonClassName)} disabled={disabled} type="button" variant="outline">
+          <PlusCircle aria-hidden="true" className="size-4" />
+          Add Carrier
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add carrier</DialogTitle>
+          <DialogDescription>Create a carrier record and select it for this intake.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            startTransition(async () => {
+              const result = await addCarrierAction({ name, shortName });
+              if (!result.ok) {
+                setMessage(result.message);
+                return;
+              }
+
+              onCarrierAdded(result.carrier);
+              setMessage(undefined);
+              setOpen(false);
+              reset();
+              router.refresh();
+            });
+          }}
+        >
+          <Field required label="Carrier name">
+            <Input required value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Field help="Optional abbreviation for compact lists and reports." label="Short name">
+            <Input value={shortName} onChange={(event) => setShortName(event.target.value)} />
+          </Field>
+          {message ? <p className="text-sm text-[var(--urgent)]">{message}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Close</Button>
+            <Button disabled={isPending} type="submit">{isPending ? "Saving..." : "Save carrier"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AddCarrierContactDialog({
   buttonClassName,
   buttonLabel = "Add New Carrier Contact",
@@ -1048,12 +1182,13 @@ function RecoveryDetailsStep(props: {
   suggestedAmount: string;
   addEvidence: (evidenceType: string) => void;
   removeEvidence: (index: number) => void;
+  removeParty: (index: number) => void;
   updateStepTwo: <K extends keyof IntakeFormData["stepTwo"]>(key: K, value: IntakeFormData["stepTwo"][K]) => void;
   updateParty: (index: number, key: string, value: string | boolean) => void;
   updateEvidence: (index: number, key: string, value: string) => void;
   onAddParty: (role: IntakeFormData["stepTwo"]["parties"][number]["role"]) => void;
 }) {
-  const { data, options, suggestedAmount, addEvidence, removeEvidence, updateStepTwo, updateParty, updateEvidence, onAddParty } = props;
+  const { data, options, suggestedAmount, addEvidence, removeEvidence, removeParty, updateStepTwo, updateParty, updateEvidence, onAddParty } = props;
   const showCoverage = data.stepTwo.insuranceStatus === "confirmed_coverage" || data.stepTwo.insuranceStatus === "identified_unconfirmed";
   const [evidenceSearch, setEvidenceSearch] = useState("");
   const [selectedEvidenceType, setSelectedEvidenceType] = useState("");
@@ -1166,48 +1301,70 @@ function RecoveryDetailsStep(props: {
           <div className="grid gap-3">
             {data.stepTwo.parties.map((party, index) => (
               <Card className="border-border bg-background" key={party.id}>
-                <CardContent className="grid gap-4 p-4 md:grid-cols-4">
-                  <Field label="Role">
-                    <select className={selectClass()} value={party.role} onChange={(event) => updateParty(index, "role", event.target.value)}>
-                      {partyRoleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Party type">
-                    <select className={selectClass()} value={party.mode} onChange={(event) => updateParty(index, "mode", event.target.value)}>
-                      <option value="contact">Person/contact</option>
-                      <option value="organization">Organization</option>
-                    </select>
-                  </Field>
-                  {party.mode === "contact" ? (
-                    <>
-                      <Field label="Existing contact">
-                        <select className={selectClass()} value={party.contactId ?? ""} onChange={(event) => updateParty(index, "contactId", event.target.value)}>
-                          <option value="">Create new or select</option>
-                          {options.contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.firstName} {contact.lastName}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="First name"><Input value={party.firstName ?? ""} onChange={(event) => updateParty(index, "firstName", event.target.value)} /></Field>
-                      <Field label="Last name"><Input value={party.lastName ?? ""} onChange={(event) => updateParty(index, "lastName", event.target.value)} /></Field>
-                    </>
-                  ) : (
-                    <>
-                      <Field label="Existing organization">
-                        <select className={selectClass()} value={party.organizationId ?? ""} onChange={(event) => updateParty(index, "organizationId", event.target.value)}>
-                          <option value="">Create new or select</option>
-                          {options.organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="Organization name"><Input value={party.organizationName ?? ""} onChange={(event) => updateParty(index, "organizationName", event.target.value)} /></Field>
-                    </>
-                  )}
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <input checked={party.isPrimary} type="checkbox" onChange={(event) => updateParty(index, "isPrimary", event.target.checked)} />
-                    Primary
-                  </label>
-                  <div className="md:col-span-4">
-                    <Field label="Note">
-                      <Input value={party.notes ?? ""} onChange={(event) => updateParty(index, "notes", event.target.value)} />
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        {partyRoleOptions.find((option) => option.value === party.role)?.label ?? "Matter party"}
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {party.mode === "organization" ? "Organization" : "Person/contact"}
+                      </p>
+                    </div>
+                    <Button
+                      aria-label={`Remove ${partyRoleOptions.find((option) => option.value === party.role)?.label ?? "party"}`}
+                      className="text-muted-foreground hover:text-[var(--urgent)]"
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => removeParty(index)}
+                    >
+                      <X aria-hidden="true" className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <Field label="Role">
+                      <select className={selectClass()} value={party.role} onChange={(event) => updateParty(index, "role", event.target.value)}>
+                        {partyRoleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
                     </Field>
+                    <Field label="Party type">
+                      <select className={selectClass()} value={party.mode} onChange={(event) => updateParty(index, "mode", event.target.value)}>
+                        <option value="contact">Person/contact</option>
+                        <option value="organization">Organization</option>
+                      </select>
+                    </Field>
+                    {party.mode === "contact" ? (
+                      <>
+                        <Field label="Existing contact">
+                          <select className={selectClass()} value={party.contactId ?? ""} onChange={(event) => updateParty(index, "contactId", event.target.value)}>
+                            <option value="">Create new or select</option>
+                            {options.contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.firstName} {contact.lastName}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="First name"><Input value={party.firstName ?? ""} onChange={(event) => updateParty(index, "firstName", event.target.value)} /></Field>
+                        <Field label="Last name"><Input value={party.lastName ?? ""} onChange={(event) => updateParty(index, "lastName", event.target.value)} /></Field>
+                      </>
+                    ) : (
+                      <>
+                        <Field label="Existing organization">
+                          <select className={selectClass()} value={party.organizationId ?? ""} onChange={(event) => updateParty(index, "organizationId", event.target.value)}>
+                            <option value="">Create new or select</option>
+                            {options.organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Organization name"><Input value={party.organizationName ?? ""} onChange={(event) => updateParty(index, "organizationName", event.target.value)} /></Field>
+                      </>
+                    )}
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <input checked={party.isPrimary} type="checkbox" onChange={(event) => updateParty(index, "isPrimary", event.target.checked)} />
+                      Primary
+                    </label>
+                    <div className="md:col-span-4">
+                      <Field label="Note">
+                        <Input value={party.notes ?? ""} onChange={(event) => updateParty(index, "notes", event.target.value)} />
+                      </Field>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1320,8 +1477,15 @@ function RecoveryDetailsStep(props: {
                   {evidenceStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
                 <Input placeholder="Optional note" value={item.notes ?? ""} onChange={(event) => updateEvidence(index, "notes", event.target.value)} />
-                <Button type="button" variant="outline" onClick={() => removeEvidence(index)}>
-                  Remove
+                <Button
+                  aria-label={`Remove ${formatEvidenceType(item.evidenceType)}`}
+                  className="text-muted-foreground hover:text-[var(--urgent)]"
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => removeEvidence(index)}
+                >
+                  <X aria-hidden="true" className="size-4" />
                 </Button>
               </div>
             ))}

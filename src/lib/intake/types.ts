@@ -32,6 +32,7 @@ export type IntakeOptions = {
   permission: {
     canCreateMatter: boolean;
     canVerifyDeadline: boolean;
+    canAddCarrier: boolean;
     canAddCarrierContact: boolean;
   };
   mode: "database" | "development";

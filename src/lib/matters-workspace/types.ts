@@ -99,6 +99,7 @@ export type MattersQueryState = {
     amountRecovered: boolean;
     noAmountSought: boolean;
     nextAction: string;
+    needsAttention: boolean;
     overdueNextAction: boolean;
     missingNextAction: boolean;
     draftIntake: boolean;
@@ -106,12 +107,14 @@ export type MattersQueryState = {
     awaitingClient: boolean;
     closed: boolean;
     archived: boolean;
+    archivedOnly: boolean;
     deadlineWindow: "" | "30" | "60" | "90";
     overdueDeadline: boolean;
     missingStatuteDeadline: boolean;
     unverifiedDeadline: boolean;
     staleDays: "" | "14" | "30" | "60" | "custom";
     customStaleDays: string;
+    missingInformation: boolean;
     missingAdjuster: boolean;
     missingResponsibleParty: boolean;
     unknownInsurance: boolean;

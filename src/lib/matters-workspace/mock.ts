@@ -61,7 +61,7 @@ export const systemSavedViews: WorkspaceSavedView[] = [
     name: "Needs Attention",
     scope: "system",
     description: "Overdue actions, urgent deadlines, stale matters, and missing information.",
-    filterConfiguration: { ...defaultMattersQuery, filters: { ...defaultMattersQuery.filters, overdueNextAction: true, missingNextAction: true, staleDays: "30" } },
+    filterConfiguration: { ...defaultMattersQuery, filters: { ...defaultMattersQuery.filters, needsAttention: true } },
     canModify: false,
   },
   {
@@ -69,7 +69,7 @@ export const systemSavedViews: WorkspaceSavedView[] = [
     name: "Missing Information",
     scope: "system",
     description: "Matters with material information gaps tracked by triage rules.",
-    filterConfiguration: { ...defaultMattersQuery, filters: { ...defaultMattersQuery.filters, missingResponsibleParty: true, unknownInsurance: true, unknownLiability: true, missingPaymentDocumentation: true } },
+    filterConfiguration: { ...defaultMattersQuery, filters: { ...defaultMattersQuery.filters, missingInformation: true } },
     canModify: false,
   },
   {
@@ -85,7 +85,7 @@ export const systemSavedViews: WorkspaceSavedView[] = [
     name: "Upcoming Deadlines",
     scope: "system",
     description: "Matters with statute deadlines in the next 30 days.",
-    filterConfiguration: { ...defaultMattersQuery, filters: { ...defaultMattersQuery.filters, deadlineWindow: "90", unverifiedDeadline: true } },
+    filterConfiguration: { ...defaultMattersQuery, sort: "statute_deadline", filters: { ...defaultMattersQuery.filters, deadlineWindow: "90" } },
     canModify: false,
   },
   {

@@ -27,6 +27,7 @@ export const defaultMattersQuery: MattersQueryState = {
     amountRecovered: false,
     noAmountSought: false,
     nextAction: "",
+    needsAttention: false,
     overdueNextAction: false,
     missingNextAction: false,
     draftIntake: false,
@@ -34,12 +35,14 @@ export const defaultMattersQuery: MattersQueryState = {
     awaitingClient: false,
     closed: false,
     archived: false,
+    archivedOnly: false,
     deadlineWindow: "",
     overdueDeadline: false,
     missingStatuteDeadline: false,
     unverifiedDeadline: false,
     staleDays: "",
     customStaleDays: "",
+    missingInformation: false,
     missingAdjuster: false,
     missingResponsibleParty: false,
     unknownInsurance: false,
@@ -67,6 +70,7 @@ export const sortLabels: Record<MattersSort, string> = {
 const boolKeys = [
   "amountRecovered",
   "noAmountSought",
+  "needsAttention",
   "overdueNextAction",
   "missingNextAction",
   "draftIntake",
@@ -74,9 +78,11 @@ const boolKeys = [
   "awaitingClient",
   "closed",
   "archived",
+  "archivedOnly",
   "overdueDeadline",
   "missingStatuteDeadline",
   "unverifiedDeadline",
+  "missingInformation",
   "missingAdjuster",
   "missingResponsibleParty",
   "unknownInsurance",
@@ -102,6 +108,10 @@ const stringKeys = [
   "staleDays",
   "customStaleDays",
 ] as const;
+
+type MattersQueryOverrides = Omit<Partial<MattersQueryState>, "filters"> & {
+  filters?: Partial<MattersQueryState["filters"]>;
+};
 
 export function parseMattersQuery(params?: Record<string, string | string[] | undefined> | URLSearchParams): MattersQueryState {
   const read = (key: string) => {
@@ -136,7 +146,7 @@ export function parseMattersQuery(params?: Record<string, string | string[] | un
   return query;
 }
 
-export function createMattersQueryString(query: MattersQueryState, overrides?: Partial<MattersQueryState>) {
+export function createMattersQueryString(query: MattersQueryState, overrides?: MattersQueryOverrides) {
   const merged: MattersQueryState = {
     ...query,
     ...overrides,
@@ -181,8 +191,9 @@ export function getStaleDayThreshold(query: MattersQueryState) {
 }
 
 export function applySavedView(query: MattersQueryState, views: WorkspaceSavedView[]) {
+  if (!query.view) return query;
   const view = views.find((item) => item.id === query.view);
-  if (!view) return query;
+  if (!view) return { ...query, view: "" };
   return {
     ...view.filterConfiguration,
     view: query.view,
@@ -196,7 +207,8 @@ export function filterMatterItems(items: MatterListItem[], query: MattersQuerySt
   const q = query.q.toLowerCase();
   const staleDays = getStaleDayThreshold(query);
   const filtered = items.filter((matter) => {
-    if (!query.filters.archived && matter.isArchived) return false;
+    if (query.filters.archivedOnly && !matter.isArchived) return false;
+    if (!query.filters.archived && !query.filters.archivedOnly && matter.isArchived) return false;
     if (!query.filters.closed && matter.stage === "closed") return false;
     if (query.filters.carrier && matter.carrierName !== query.filters.carrier) return false;
     if (query.filters.adjuster && matter.assignedAdjusterName !== query.filters.adjuster) return false;
@@ -212,6 +224,7 @@ export function filterMatterItems(items: MatterListItem[], query: MattersQuerySt
     if (query.filters.amountRecovered && matter.amountRecovered <= 0) return false;
     if (query.filters.noAmountSought && matter.amountSought !== 0) return false;
     if (query.filters.nextAction && matter.nextAction !== query.filters.nextAction) return false;
+    if (query.filters.needsAttention && matter.warnings.length === 0 && matter.priority !== "urgent" && matter.priority !== "high") return false;
     if (query.filters.overdueNextAction && !matter.warnings.includes("overdue_next_action")) return false;
     if (query.filters.missingNextAction && !matter.warnings.includes("missing_next_action")) return false;
     if (query.filters.draftIntake && matter.intakeStatus === "complete") return false;
@@ -223,6 +236,7 @@ export function filterMatterItems(items: MatterListItem[], query: MattersQuerySt
     if (query.filters.unverifiedDeadline && matter.statuteDeadlineVerified) return false;
     if (query.filters.deadlineWindow && (!matter.statuteDeadline || daysUntil(matter.statuteDeadline, now) > Number(query.filters.deadlineWindow))) return false;
     if (staleDays !== null && (matter.daysSinceLastSubstantiveActivity ?? 0) < staleDays) return false;
+    if (query.filters.missingInformation && !matter.warnings.includes("missing_information") && !matter.warnings.includes("missing_required_evidence")) return false;
     if (query.filters.missingAdjuster && matter.assignedAdjusterName) return false;
     if (query.filters.missingResponsibleParty && matter.primaryPartyNames.length > 0) return false;
     if (query.filters.unknownInsurance && matter.insuranceStatus !== "unknown") return false;

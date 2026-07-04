@@ -82,8 +82,13 @@ const partySchema = z.object({
 const eventSchema = z.object({
   matterId: matterIdSchema,
   eventType: z.string().trim().min(1),
-  occurredAt: z.string().trim().min(1),
+  occurredTime: z.string().trim().regex(/^\d{2}:\d{2}$/, "Enter a valid time.").optional().or(z.literal("")),
   description: z.string().trim().min(1).max(700),
+});
+
+const eventIdSchema = z.object({
+  matterId: matterIdSchema,
+  eventId: z.string().trim().min(1),
 });
 
 const closeSchema = z.object({
@@ -375,19 +380,108 @@ export async function submitUpsertPartyAction(formData: FormData) {
   await upsertPartyAction(formData);
 }
 
-export async function addMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
+export async function addMatterEventAction(_state: WorkspaceActionResult, formData: FormData): Promise<WorkspaceActionResult> {
   const parsed = parseForm(eventSchema, formData);
   if (!parsed.ok) return parsed.result;
   const permission = await requirePermission("edit");
   if (!permission.ok) return permission.result;
   if (!isSupabaseConfigured()) return { ok: true, message: "Matter event added in development mode." };
-  await addMatterEvent(parsed.data.matterId, permission.profile.id, parsed.data.eventType, parsed.data.description, parsed.data.occurredAt);
+
+  const occurredAt = parsed.data.occurredTime
+    ? `${today()}T${parsed.data.occurredTime}:00`
+    : new Date().toISOString();
+
+  const supabase = await createClient();
+  const recentDuplicateWindow = new Date(Date.now() - 15_000).toISOString();
+  const { data: recentDuplicate } = await supabase
+    .from("matter_events")
+    .select("id")
+    .eq("matter_id", parsed.data.matterId)
+    .eq("recorded_by", permission.profile.id)
+    .eq("event_type", parsed.data.eventType)
+    .eq("description", parsed.data.description)
+    .eq("occurred_at", occurredAt)
+    .gte("created_at", recentDuplicateWindow)
+    .limit(1)
+    .maybeSingle();
+
+  if (!recentDuplicate) {
+    await addMatterEvent(parsed.data.matterId, permission.profile.id, parsed.data.eventType, parsed.data.description, occurredAt);
+  }
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: "Matter event added." };
 }
 
-export async function submitAddMatterEventAction(formData: FormData) {
-  await addMatterEventAction(formData);
+
+export async function strikeMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
+  const parsed = parseForm(eventIdSchema, formData);
+  if (!parsed.ok) return parsed.result;
+  const permission = await requirePermission("edit");
+  if (!permission.ok) return permission.result;
+  if (!isSupabaseConfigured()) return { ok: true, message: "Entry struck through in development mode." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("matter_events")
+    .update({ struck_through_at: new Date().toISOString(), struck_through_by: permission.profile.id })
+    .eq("id", parsed.data.eventId)
+    .select("id")
+    .single();
+  if (error) return { ok: false, message: "We could not update this entry. You can only strike through your own entries." };
+
+  revalidateMatter(parsed.data.matterId);
+  return { ok: true, message: "Entry struck through." };
+}
+
+export async function submitStrikeMatterEventAction(formData: FormData) {
+  await strikeMatterEventAction(formData);
+}
+
+export async function restoreMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
+  const parsed = parseForm(eventIdSchema, formData);
+  if (!parsed.ok) return parsed.result;
+  const permission = await requirePermission("edit");
+  if (!permission.ok) return permission.result;
+  if (!isSupabaseConfigured()) return { ok: true, message: "Entry restored in development mode." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("matter_events")
+    .update({ struck_through_at: null, struck_through_by: null })
+    .eq("id", parsed.data.eventId)
+    .select("id")
+    .single();
+  if (error) return { ok: false, message: "We could not restore this entry." };
+
+  revalidateMatter(parsed.data.matterId);
+  return { ok: true, message: "Entry restored." };
+}
+
+export async function submitRestoreMatterEventAction(formData: FormData) {
+  await restoreMatterEventAction(formData);
+}
+
+export async function deleteMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
+  const parsed = parseForm(eventIdSchema, formData);
+  if (!parsed.ok) return parsed.result;
+  const permission = await requirePermission("edit");
+  if (!permission.ok) return permission.result;
+  if (permission.profile.role !== "admin") {
+    return { ok: false, message: "Only an administrator can delete an entry entirely. Strike it through instead." };
+  }
+  if (!isSupabaseConfigured()) return { ok: true, message: "Entry deleted in development mode." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("matter_events").delete().eq("id", parsed.data.eventId);
+  if (error) return { ok: false, message: "We could not delete this entry." };
+
+  await logActivity(parsed.data.matterId, permission.profile.id, "delete_matter_event", "matter_event", parsed.data.eventId, "Deleted an activity entry.", null);
+  revalidateMatter(parsed.data.matterId);
+  return { ok: true, message: "Entry deleted." };
+}
+
+export async function submitDeleteMatterEventAction(formData: FormData) {
+  await deleteMatterEventAction(formData);
 }
 
 export async function closeMatterAction(formData: FormData): Promise<WorkspaceActionResult> {

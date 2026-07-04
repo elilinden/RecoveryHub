@@ -136,6 +136,7 @@ type EventRow = {
   recorded_by: string | null;
   source: MatterEventSource;
   description: string;
+  struck_through_at: string | null;
 };
 type ActivityRow = {
   id: string;
@@ -587,7 +588,9 @@ function mapEvent(row: EventRow, profiles: Map<string, ProfileRow>): TimelineIte
     label: row.event_type.replaceAll("_", " "),
     description: row.description,
     actorName: row.recorded_by ? profiles.get(row.recorded_by)?.full_name ?? null : null,
+    actorId: row.recorded_by,
     source: row.source,
+    isStruckThrough: Boolean(row.struck_through_at),
   };
 }
 
@@ -599,7 +602,9 @@ function mapActivity(row: ActivityRow, profiles: Map<string, ProfileRow>): Timel
     label: row.action_type.replaceAll("_", " "),
     description: row.description,
     actorName: row.actor_id ? profiles.get(row.actor_id)?.full_name ?? null : null,
+    actorId: row.actor_id,
     source: "system_activity",
+    isStruckThrough: false,
   };
 }
 

@@ -5,9 +5,12 @@ import { z } from "zod";
 
 import { getCurrentProfile, type Profile, type ProfileRole } from "@/lib/data/profiles";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { createStoragePath, matterDocumentBucket, validateDocumentFileMetadata } from "@/lib/documents-packages/storage";
+import { createDocumentId, createStoragePath, matterDocumentBucket, validateDocumentFileMetadata } from "@/lib/documents-packages/storage";
+import { scanFileForMalware } from "@/lib/documents-packages/scanning";
 import { resetVerificationOnEmailChange } from "@/lib/documents-packages/validation";
+import type { DocumentScanStatus, DocumentStatus } from "@/lib/documents-packages/types";
 
 export type DocumentPackageActionResult = { ok: true; message: string } | { ok: false; message: string; fieldErrors?: Record<string, string> };
 
@@ -134,13 +137,20 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
 
   const supabase = await createClient();
   for (const item of validatedFiles) {
-    const storagePath = createStoragePath({ matterId: parsed.data.matterId, extension: item.validation.fileExtension });
+    const documentId = createDocumentId();
+    const storagePath = createStoragePath({
+      matterId: parsed.data.matterId,
+      documentId,
+      filename: item.validation.safeDisplayFilename,
+    });
     const { error: uploadError } = await supabase.storage.from(matterDocumentBucket).upload(storagePath, item.file, {
       contentType: item.validation.mimeType,
       upsert: false,
     });
     if (uploadError) return { ok: false, message: "Upload failed. No public URL was created." };
+
     const { data, error } = await supabase.from("matter_documents").insert({
+      id: documentId,
       matter_id: parsed.data.matterId,
       title: files.length === 1 ? parsed.data.title : `${parsed.data.title} - ${item.validation.safeDisplayFilename}`,
       document_type: parsed.data.documentType,
@@ -155,12 +165,17 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
       file_extension: item.validation.fileExtension,
       file_size_bytes: item.file.size,
       file_hash: item.validation.fileHash,
-      status: "available",
-      scan_status: "not_scanned",
+      status: "processing",
+      scan_status: "pending",
       visibility: parsed.data.visibility,
       uploaded_by: permission.profile.id,
     }).select("id").single();
-    if (error) return { ok: false, message: "The file uploaded, but document metadata could not be saved." };
+
+    if (error) {
+      await deleteOrphanedUpload(storagePath);
+      return { ok: false, message: "The file uploaded, but document metadata could not be saved. The upload was removed; try again." };
+    }
+
     if (parsed.data.evidenceItemId) {
       await supabase.from("evidence_document_links").insert({
         evidence_item_id: parsed.data.evidenceItemId,
@@ -168,10 +183,33 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
         created_by: permission.profile.id,
       });
     }
-    await logActivity(parsed.data.matterId, permission.profile.id, "document_uploaded", "matter_document", String(data.id), "Document uploaded.", { scan_status: "not_scanned" });
+    await logActivity(parsed.data.matterId, permission.profile.id, "document_uploaded", "matter_document", String(data.id), "Document uploaded.", { scan_status: "pending" });
+
+    const scanOutcome = await scanFileForMalware({
+      bytes: item.bytes,
+      filename: item.validation.safeDisplayFilename,
+      mimeType: item.validation.mimeType,
+    });
+    const resolvedStatus = statusForScanOutcome(scanOutcome);
+    await supabase.from("matter_documents").update({ status: resolvedStatus, scan_status: scanOutcome }).eq("id", documentId);
+    if (scanOutcome === "flagged") {
+      await logActivity(parsed.data.matterId, permission.profile.id, "document_flagged", "matter_document", String(data.id), "Uploaded file was flagged by malware scanning and quarantined.", { scan_status: scanOutcome });
+    }
   }
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: `${validatedFiles.length} document${validatedFiles.length === 1 ? "" : "s"} uploaded.` };
+}
+
+function statusForScanOutcome(scanOutcome: DocumentScanStatus): DocumentStatus {
+  if (scanOutcome === "clean") return "available";
+  if (scanOutcome === "flagged") return "quarantined";
+  return "processing";
+}
+
+async function deleteOrphanedUpload(storagePath: string) {
+  const admin = createAdminClient();
+  if (!admin) return;
+  await admin.storage.from(matterDocumentBucket).remove([storagePath]);
 }
 
 export async function submitUploadMatterDocumentsAction(formData: FormData) {

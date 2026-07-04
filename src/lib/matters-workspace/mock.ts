@@ -278,7 +278,9 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
         label: activity.title,
         description: activity.description,
         actorName: "Eli Linden",
+        actorId: "development-profile",
         source: "system_activity" as const,
+        isStruckThrough: false,
       })),
     {
       id: `${id}-event-referral`,
@@ -287,7 +289,9 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       label: "Referral received",
       description: "Referral accepted into Recovery Hub.",
       actorName: item.assignedAttorneyName,
+      actorId: "development-profile",
       source: "manual" as const,
+      isStruckThrough: false,
     },
     ...(id === "fairlane-contractor-overpayment" ? [{
       id: `${id}-event-authority-requested`,
@@ -296,7 +300,9 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       label: "Authority requested",
       description: "Settlement authority requested from the carrier contact.",
       actorName: item.assignedAttorneyName,
+      actorId: "development-profile",
       source: "manual" as const,
+      isStruckThrough: false,
     }] : []),
     ...(id === "lakeview-delivery-collision" ? [{
       id: `${id}-event-demand-sent`,
@@ -305,7 +311,9 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       label: "Demand sent",
       description: "Demand marked sent for fictional development data.",
       actorName: item.assignedAttorneyName,
+      actorId: "development-profile",
       source: "manual" as const,
+      isStruckThrough: false,
     }] : []),
   ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   const canViewInternalNotes = profile.role !== "billing" && profile.role !== "read_only";

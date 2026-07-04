@@ -63,8 +63,19 @@ export function sanitizeDisplayFilename(filename: string, fallbackExtension = "b
   return candidate.includes(".") ? candidate : `${candidate}.${fallbackExtension}`;
 }
 
-export function createStoragePath(input: { matterId: string; extension: string }) {
-  return `${input.matterId}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${input.extension}`;
+/**
+ * Storage path enforcement lives in the matter_document_objects_insert_authorized RLS
+ * policy (supabase/migrations/202607040001_document_quarantine_enforcement.sql), which
+ * requires uploads to land under <matter-id>/<document-id>/<filename> for a matter the
+ * uploader can access. documentId must be the matter_documents row's own id so the two
+ * stay in sync.
+ */
+export function createStoragePath(input: { matterId: string; documentId: string; filename: string }) {
+  return `${input.matterId}/${input.documentId}/${input.filename}`;
+}
+
+export function createDocumentId() {
+  return randomUUID();
 }
 
 export function canPreviewDocument(input: { mimeType: string | null; status: DocumentStatus; scanStatus: DocumentScanStatus }) {

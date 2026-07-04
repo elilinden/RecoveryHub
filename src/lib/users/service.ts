@@ -135,6 +135,9 @@ export async function inviteUser(
     };
   }
 
+  // redirectTo only needs to pass Supabase's allow-listed redirect URL check now —
+  // the actual invite link is built from {{ .TokenHash }} in the Supabase email
+  // template (see docs/supabase-foundation.md), not from this value.
   const redirectTo = `${getSiteOrigin()}/reset-password`;
   const { data, error } = await admin.auth.admin.inviteUserByEmail(input.email, {
     data: { full_name: input.fullName },
@@ -326,6 +329,10 @@ export async function resendInvitation(userId: string, actingAdmin: Profile): Pr
     return { ok: false, message: "This user has already confirmed their account. Resend is not available." };
   }
 
+  // Re-invoking inviteUserByEmail (the admin API's /invite endpoint) is the
+  // documented way to resend an unconfirmed invite. This is deliberately not
+  // supabase.auth.resend(), whose `type` is restricted to "signup" |
+  // "email_change" and does not support "invite" at all.
   const redirectTo = `${getSiteOrigin()}/reset-password`;
   const { error } = await admin.auth.admin.inviteUserByEmail(target.email, {
     data: { full_name: target.full_name },

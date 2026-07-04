@@ -136,7 +136,9 @@ describe("evaluateMatterTriage", () => {
         label: "Demand sent",
         description: "Demand sent.",
         actorName: "Eli Linden",
+        actorId: "profile-1",
         source: "manual",
+        isStruckThrough: false,
       }],
     }), defaultTriageSettings, now).flags.some((flag) => flag.flagType === "awaiting_response")).toBe(true);
 

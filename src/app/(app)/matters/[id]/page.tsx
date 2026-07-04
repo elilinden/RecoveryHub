@@ -8,17 +8,18 @@ import { PageHeader } from "@/components/common/page-header";
 import { SectionHeader } from "@/components/common/section-header";
 import { StatusBadge } from "@/components/common/status-badge";
 import { StatusBadgeList } from "@/components/common/status-badge-list";
+import { AddMatterEventForm } from "@/components/matters/add-matter-event-form";
 import { EditCurrentStatusSheet } from "@/components/matters/edit-current-status-sheet";
 import { MatterDetailWorkspace, type MatterWorkTab } from "@/components/matters/matter-detail-workspace";
 import { DateField, MoneyField, SelectField, TextField } from "@/components/matters/matter-form-fields";
 import { MatterSummaryStrip } from "@/components/matters/matter-summary-strip";
+import { MatterTimeline } from "@/components/matters/matter-timeline";
 import { MatterDocumentsPackagesPanel } from "@/components/documents-packages/matter-documents-packages-panel";
 import { AssessmentSummaryCards } from "@/components/recovery-assessment/assessment-summary-cards";
 import { MatterTriagePanel } from "@/components/triage/matter-triage-panel";
 import { TriageSeverityBadge } from "@/components/triage/triage-severity-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { requireActiveProfile } from "@/lib/auth/session";
 import {
   assessmentLabels,
@@ -26,7 +27,6 @@ import {
   evidenceStatusLabels,
   insuranceStatusLabels,
   intakeStatusLabels,
-  labelFromValue,
   matterStageLabels,
   matterTypeLabels,
   priorityLabels,
@@ -41,7 +41,6 @@ import { loadMatterDocumentsAndPackages } from "@/lib/documents-packages/data";
 import { permissionsForRole } from "@/lib/documents-packages/types";
 import type { MatterAssignment } from "@/lib/matters-workspace/types";
 import {
-  submitAddMatterEventAction,
   submitArchiveMatterAction,
   submitCloseMatterAction,
   submitReopenMatterAction,
@@ -415,51 +414,8 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         <Card className="border-border bg-card shadow-sm">
           <CardContent className="space-y-6 p-6">
             <SectionHeader title="Activity" />
-            {matter.permissions.canAddEvents ? (
-              <form action={submitAddMatterEventAction} className="grid gap-3 rounded-lg border border-border bg-background p-4 lg:grid-cols-[180px_220px_1fr_auto]">
-                <input name="matterId" type="hidden" value={matter.id} />
-                <SelectField
-                  label="Event type"
-                  name="eventType"
-                  options={[
-                    ["document_requested", "Document requested"],
-                    ["document_received", "Document received"],
-                    ["demand_sent", "Demand sent"],
-                    ["response_received", "Response received"],
-                    ["offer_received", "Offer received"],
-                    ["recovery_received", "Recovery received"],
-                    ["other", "Other event"],
-                  ]}
-                  value="other"
-                />
-                <label className="space-y-1 text-sm font-medium text-foreground">
-                  <span>Date and time</span>
-                  <Input name="occurredAt" type="datetime-local" />
-                </label>
-                <TextField label="Description" name="description" value="" />
-                <Button className="self-end" type="submit">
-                  Add Event
-                </Button>
-              </form>
-            ) : null}
-            <div className="space-y-3">
-              {matter.timeline.map((item) => (
-                <div className="rounded-lg border border-border bg-background p-4" key={`${item.kind}-${item.id}`}>
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={item.kind === "event" ? "Ready for demand" : "Under review"} />
-                      <p className="font-medium text-foreground">{labelFromValue(item.label)}</p>
-                    </div>
-                    <time className="text-sm text-muted-foreground" dateTime={item.occurredAt}>
-                      {new Date(item.occurredAt).toLocaleString()}
-                    </time>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
-                  {item.actorName ? <p className="mt-2 text-xs text-muted-foreground">By {item.actorName}</p> : null}
-                </div>
-              ))}
-              {matter.timeline.length === 0 ? <p className="text-sm text-muted-foreground">No activity recorded yet.</p> : null}
-            </div>
+            {matter.permissions.canAddEvents ? <AddMatterEventForm matterId={matter.id} /> : null}
+            <MatterTimeline currentProfileId={session.profile.id} isAdmin={session.profile.role === "admin"} items={matter.timeline} matterId={matter.id} />
           </CardContent>
         </Card>
       ),

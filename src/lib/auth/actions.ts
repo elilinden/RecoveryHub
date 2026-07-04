@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { EmailOtpType } from "@supabase/supabase-js";
 
 import { updateCurrentProfile } from "@/lib/data/profiles";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +11,8 @@ export type AuthActionState = {
   status: "idle" | "error" | "success";
   message?: string;
 };
+
+const confirmableTypes = new Set<EmailOtpType>(["invite", "recovery"]);
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -56,7 +59,7 @@ export async function forgotPasswordAction(
   try {
     const supabase = await createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getOrigin()}/auth/callback?next=/reset-password`,
+      redirectTo: `${getOrigin()}/reset-password`,
     });
 
     if (error) {
@@ -67,6 +70,49 @@ export async function forgotPasswordAction(
   }
 
   return { status: "success", message: "If that account exists, a reset link has been sent." };
+}
+
+/**
+ * Confirms an invite or recovery link and establishes a session, via a real
+ * form submission rather than a page-load side effect.
+ *
+ * Supabase's default email templates link straight to Supabase's own
+ * `/auth/v1/verify` endpoint, which consumes the one-time token and redirects
+ * back to us with an already-established session — before our page ever
+ * loads. Corporate/institutional email security scanners (Microsoft Safe
+ * Links, Proofpoint, Mimecast, etc.) pre-fetch every link in an incoming
+ * email with a real browser, which silently burns that one-time token before
+ * the recipient opens it. No amount of gating on our side after that point
+ * helps, because the consumption already happened on Supabase's server.
+ *
+ * The fix is to stop using `{{ .ConfirmationURL }}` in the Supabase email
+ * templates and instead link to our own page with `{{ .TokenHash }}`, then
+ * call verifyOtp() ourselves — only in response to this POST form submission.
+ * A scanner's GET-only prefetch of our page can never trigger a POST, so the
+ * token is never consumed until a human actually clicks "Continue". See
+ * docs/supabase-foundation.md for the required email template configuration.
+ */
+export async function confirmAuthLinkAction(_state: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const tokenHash = getString(formData, "token_hash");
+  const typeValue = getString(formData, "type");
+  const type = confirmableTypes.has(typeValue as EmailOtpType) ? (typeValue as EmailOtpType) : null;
+
+  if (!tokenHash || !type) {
+    return { status: "error", message: "This link is missing required information." };
+  }
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+
+    if (error) {
+      return { status: "error", message: "This link is expired or invalid. Ask an administrator to resend it." };
+    }
+  } catch {
+    return { status: "error", message: "Recovery Hub is not connected to Supabase yet." };
+  }
+
+  redirect("/reset-password");
 }
 
 export async function resetPasswordAction(

@@ -1,4 +1,4 @@
-import { Gauge, PackageCheck, Scale, Settings } from "lucide-react";
+import { Gauge, HelpCircle, PackageCheck, Scale, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type NavigationItem = {
@@ -12,4 +12,5 @@ export const navigationItems: NavigationItem[] = [
   { label: "Matters", href: "/matters", icon: Scale },
   { label: "Packages", href: "/packages", icon: PackageCheck },
   { label: "Settings", href: "/settings", icon: Settings },
+  { label: "How to Use", href: "/help", icon: HelpCircle },
 ];

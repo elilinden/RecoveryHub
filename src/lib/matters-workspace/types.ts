@@ -303,5 +303,7 @@ export type TimelineItem = {
   label: string;
   description: string;
   actorName: string | null;
+  actorId: string | null;
   source: MatterEventSource | "system_activity";
+  isStruckThrough: boolean;
 };

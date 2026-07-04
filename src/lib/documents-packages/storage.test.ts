@@ -30,10 +30,9 @@ describe("document storage helpers", () => {
     expect(validateDocumentFileMetadata({ name: "large.pdf", type: "application/pdf", size: maxDocumentFileSizeBytes + 1 }).ok).toBe(false);
   });
 
-  it("creates randomized storage paths without filenames", () => {
-    const path = createStoragePath({ matterId: "matter-1", extension: "pdf" });
-    expect(path).toMatch(/^matter-1\/\d{4}-\d{2}-\d{2}\/[a-f0-9-]+\.pdf$/);
-    expect(path).not.toContain("Payment");
+  it("creates matter- and document-scoped storage paths", () => {
+    const path = createStoragePath({ matterId: "matter-1", documentId: "doc-1", filename: "Payment Ledger.pdf" });
+    expect(path).toBe("matter-1/doc-1/Payment Ledger.pdf");
   });
 
   it("blocks flagged or restricted package selection", () => {

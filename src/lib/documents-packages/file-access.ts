@@ -36,7 +36,8 @@ export async function createSignedDocumentAccessUrl(documentId: string): Promise
   if (error || !data) return { ok: false, message: "Document not found.", status: 404 };
 
   const document = data as unknown as DocumentAccessRow;
-  if (document.status === "quarantined" || document.status === "failed" || document.scan_status === "flagged") {
+  const scanClearedOrNotApplicable = document.source_type === "external_link" || document.scan_status === "clean";
+  if (document.status !== "available" || !scanClearedOrNotApplicable) {
     return { ok: false, message: "This document cannot be accessed in its current status.", status: 403 };
   }
   if (document.source_type === "external_link") {

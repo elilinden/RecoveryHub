@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/supabase/database.types";
 import { getSupabaseConfig } from "@/lib/supabase/env";
 
-const protectedPrefixes = ["/dashboard", "/matters", "/settings"];
+const protectedPrefixes = ["/dashboard", "/matters", "/settings", "/help"];
 const authPrefixes = ["/login", "/forgot-password"];
 // Reachable by an authenticated OR unauthenticated request: an invited/recovering user
 // arrives here with a brand-new, possibly still-inactive session and must be able to set

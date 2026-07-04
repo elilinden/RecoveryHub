@@ -43,6 +43,47 @@ Protected routes are `/dashboard`, `/matters`, `/matters/new`, `/matters/[id]`, 
 
 There is no public self-registration. Users should be invited or created by an administrator.
 
+### Required: email template configuration (invite and password reset)
+
+Supabase's default "Invite user" and "Reset Password" email templates link to
+`{{ .ConfirmationURL }}`, which points to Supabase's own hosted
+`/auth/v1/verify` endpoint. That endpoint consumes the one-time token and
+redirects back to the app with a session already established — before the
+app's own page ever loads. Corporate/institutional email security scanners
+(Microsoft Safe Links, Proofpoint, Mimecast, etc.) pre-fetch every link in an
+incoming email with a real browser, which silently consumes that one-time
+token before the real recipient opens the email. Nothing the app does after
+the redirect can prevent this, because the token is already spent by the time
+the app's page loads.
+
+The app instead expects these emails to link to its own `/reset-password`
+page carrying `{{ .TokenHash }}`, and only calls `verifyOtp()` in response to
+an explicit form submission (`src/lib/auth/actions.ts`,
+`confirmAuthLinkAction`). A scanner's GET-only prefetch can load that page
+without ever submitting the form, so the token is never consumed until a
+human clicks "Continue" or "Accept Invitation".
+
+**This requires editing both templates in the Supabase Dashboard** (Authentication →
+Email Templates) — it cannot be done from application code or migrations:
+
+**Invite user** — replace the `{{ .ConfirmationURL }}` link with:
+
+```html
+<a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=invite">Accept the invitation</a>
+```
+
+**Reset Password** — replace the `{{ .ConfirmationURL }}` link with:
+
+```html
+<a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery">Reset your password</a>
+```
+
+Until both templates are updated, invite and password-reset emails will link
+to the old Supabase-hosted verify URL, which this app no longer knows how to
+finish processing (the PKCE callback route and hash-fragment bridge it used
+to rely on have been removed) — links will appear broken rather than
+insecure. Update the templates before relying on either flow.
+
 ## Roles
 
 Roles are constrained by the `profile_role` enum:

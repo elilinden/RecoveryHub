@@ -238,6 +238,8 @@ export type Database = {
     Functions: {
       can_access_matter: { Args: { matter_uuid: string }; Returns: boolean };
       can_access_document: { Args: { document_uuid: string }; Returns: boolean };
+      can_download_document: { Args: { document_uuid: string }; Returns: boolean };
+      storage_path_matter_id: { Args: { object_path: string }; Returns: string };
       can_access_package: { Args: { package_uuid: string }; Returns: boolean };
       is_admin: { Args: { user_uuid?: string }; Returns: boolean };
       is_partner_or_admin: { Args: { user_uuid?: string }; Returns: boolean };

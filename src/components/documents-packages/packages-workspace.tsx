@@ -143,7 +143,7 @@ export function PackagesWorkspace({ result }: PackagesWorkspaceProps) {
                 ))}
               </div>
             </div>
-            <div className="package-queue-mobile grid gap-3 p-3">
+            <div className="package-queue-mobile gap-3 p-3">
               {result.packages.map((outboundPackage) => (
                 <PackageQueueCard
                   expanded={expandedPackageId === outboundPackage.id}

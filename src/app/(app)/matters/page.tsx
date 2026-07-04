@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight, PlusCircle } from "lucide-react";
 
 import { CurrencyDisplay } from "@/components/common/currency-display";
@@ -35,6 +36,10 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
   const params = (await searchParams) ?? {};
   const session = await requireActiveProfile();
   const { result, filterOptions, savedViews } = await loadMattersWorkspace({ profile: session.profile, searchParams: params });
+  if (result.totalCount > 0 && result.query.page > 1 && result.items.length === 0) {
+    const lastPage = Math.max(1, Math.ceil(result.totalCount / result.query.pageSize));
+    redirect(`/matters?${createMattersQueryString(result.query, { page: lastPage })}`);
+  }
   const activeFilterCount = countActiveFilters(result.query);
   const currentQueryString = createMattersQueryString(result.query);
   const canManageSharedViews = session.profile.role === "admin" || session.profile.role === "partner";
@@ -135,24 +140,32 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
                   </Button>
                 ))}
               </div>
-              <Button asChild disabled={result.query.page <= 1} size="sm" variant="outline">
-                <Link
-                  aria-disabled={result.query.page <= 1}
-                  href={`/matters?${createMattersQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}
-                >
+              {result.query.page <= 1 ? (
+                <Button disabled size="sm" variant="outline">
                   <ChevronLeft aria-hidden="true" className="size-4" />
                   Previous
-                </Link>
-              </Button>
-              <Button asChild disabled={result.rangeEnd >= result.totalCount} size="sm" variant="outline">
-                <Link
-                  aria-disabled={result.rangeEnd >= result.totalCount}
-                  href={`/matters?${createMattersQueryString(result.query, { page: result.query.page + 1 })}`}
-                >
+                </Button>
+              ) : (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/matters?${createMattersQueryString(result.query, { page: Math.max(1, result.query.page - 1) })}`}>
+                    <ChevronLeft aria-hidden="true" className="size-4" />
+                    Previous
+                  </Link>
+                </Button>
+              )}
+              {result.rangeEnd >= result.totalCount ? (
+                <Button disabled size="sm" variant="outline">
                   Next
                   <ChevronRight aria-hidden="true" className="size-4" />
-                </Link>
-              </Button>
+                </Button>
+              ) : (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/matters?${createMattersQueryString(result.query, { page: result.query.page + 1 })}`}>
+                    Next
+                    <ChevronRight aria-hidden="true" className="size-4" />
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         </>

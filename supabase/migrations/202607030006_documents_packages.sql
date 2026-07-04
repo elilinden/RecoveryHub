@@ -21,21 +21,134 @@ create type public.matter_document_type as enum (
   'other'
 );
 
-create type public.document_source_type as enum ('uploaded', 'external_link', 'generated_from_template', 'imported', 'integration');
-create type public.document_status as enum ('uploading', 'processing', 'available', 'quarantined', 'failed', 'superseded', 'archived');
-create type public.document_scan_status as enum ('not_scanned', 'pending', 'clean', 'flagged', 'scan_failed');
-create type public.document_visibility as enum ('internal_only', 'package_eligible', 'client_eligible', 'restricted');
-create type public.document_template_type as enum ('subrogation_demand', 'reimbursement_request', 'document_request', 'follow_up_demand', 'deadline_notice', 'arbitration_notice', 'litigation_notice', 'settlement_document', 'other');
-create type public.document_template_version_status as enum ('draft', 'approved', 'retired');
-create type public.outbound_package_type as enum ('initial_demand', 'supplemental_demand', 'reimbursement_request', 'document_request', 'follow_up', 'arbitration_notice', 'litigation_notice', 'settlement', 'other');
-create type public.outbound_package_status as enum ('draft', 'assembling', 'validation_needed', 'ready_for_review', 'changes_requested', 'approved_for_send', 'canceled');
-create type public.package_recipient_role as enum ('responsible_party', 'adverse_adjuster', 'adverse_insurer', 'claims_administrator', 'opposing_counsel', 'carrier_contact', 'individual', 'company', 'other');
-create type public.package_email_source as enum ('existing_contact', 'carrier_directory', 'prior_correspondence', 'user_entered', 'verified_external_source', 'unknown');
-create type public.package_verification_status as enum ('unverified', 'verification_required', 'verified', 'rejected', 'outdated');
-create type public.package_validation_status as enum ('passed', 'warning', 'failed', 'overridden');
-create type public.package_validation_severity as enum ('critical', 'high', 'medium', 'low', 'informational');
-create type public.package_review_type as enum ('preparation_review', 'attorney_review', 'final_send_review');
-create type public.package_review_decision as enum ('approved', 'changes_requested', 'rejected');
+create type public.document_source_type as enum (
+  'uploaded',
+  'external_link',
+  'generated_from_template',
+  'imported',
+  'integration'
+);
+
+create type public.document_status as enum (
+  'uploading',
+  'processing',
+  'available',
+  'quarantined',
+  'failed',
+  'superseded',
+  'archived'
+);
+
+create type public.document_scan_status as enum (
+  'not_scanned',
+  'pending',
+  'clean',
+  'flagged',
+  'scan_failed'
+);
+
+create type public.document_visibility as enum (
+  'internal_only',
+  'package_eligible',
+  'client_eligible',
+  'restricted'
+);
+
+create type public.document_template_type as enum (
+  'subrogation_demand',
+  'reimbursement_request',
+  'document_request',
+  'follow_up_demand',
+  'deadline_notice',
+  'arbitration_notice',
+  'litigation_notice',
+  'settlement_document',
+  'other'
+);
+
+create type public.document_template_version_status as enum (
+  'draft',
+  'approved',
+  'retired'
+);
+
+create type public.outbound_package_type as enum (
+  'initial_demand',
+  'supplemental_demand',
+  'reimbursement_request',
+  'document_request',
+  'follow_up',
+  'arbitration_notice',
+  'litigation_notice',
+  'settlement',
+  'other'
+);
+
+create type public.outbound_package_status as enum (
+  'draft',
+  'assembling',
+  'validation_needed',
+  'ready_for_review',
+  'changes_requested',
+  'approved_for_send',
+  'canceled'
+);
+
+create type public.package_recipient_role as enum (
+  'responsible_party',
+  'adverse_adjuster',
+  'adverse_insurer',
+  'claims_administrator',
+  'opposing_counsel',
+  'carrier_contact',
+  'individual',
+  'company',
+  'other'
+);
+
+create type public.package_email_source as enum (
+  'existing_contact',
+  'carrier_directory',
+  'prior_correspondence',
+  'user_entered',
+  'verified_external_source',
+  'unknown'
+);
+
+create type public.package_verification_status as enum (
+  'unverified',
+  'verification_required',
+  'verified',
+  'rejected',
+  'outdated'
+);
+
+create type public.package_validation_status as enum (
+  'passed',
+  'warning',
+  'failed',
+  'overridden'
+);
+
+create type public.package_validation_severity as enum (
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'informational'
+);
+
+create type public.package_review_type as enum (
+  'preparation_review',
+  'attorney_review',
+  'final_send_review'
+);
+
+create type public.package_review_decision as enum (
+  'approved',
+  'changes_requested',
+  'rejected'
+);
 
 create table public.matter_documents (
   id uuid primary key default gen_random_uuid(),
@@ -68,11 +181,16 @@ create table public.matter_documents (
   updated_at timestamptz not null default now(),
   archived_at timestamptz,
   archived_by uuid references public.profiles(id) on delete set null,
+
   constraint matter_documents_source_check check (
     (source_type = 'external_link' and external_url is not null)
-    or (source_type <> 'external_link' and storage_path is not null)
+    or
+    (source_type <> 'external_link' and storage_path is not null)
   ),
-  constraint matter_documents_version_positive check (version_number > 0)
+
+  constraint matter_documents_version_positive check (
+    version_number > 0
+  )
 );
 
 create table public.evidence_document_links (
@@ -110,8 +228,14 @@ create table public.document_template_versions (
   approved_at timestamptz,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
+
   unique (template_id, version_number),
-  constraint template_approval_required check (status <> 'approved' or (approved_by is not null and approved_at is not null))
+
+  constraint template_approval_required check (
+    status <> 'approved'
+    or
+    (approved_by is not null and approved_at is not null)
+  )
 );
 
 create table public.outbound_packages (
@@ -141,8 +265,7 @@ create table public.outbound_packages (
   canceled_by uuid references public.profiles(id) on delete set null,
   canceled_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint outbound_packages_not_sent check (status <> 'sent')
+  updated_at timestamptz not null default now()
 );
 
 create table public.outbound_package_recipients (
@@ -164,7 +287,12 @@ create table public.outbound_package_recipients (
   is_primary boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint package_recipient_verified_requires_user check (verification_status <> 'verified' or (verified_by is not null and verified_at is not null))
+
+  constraint package_recipient_verified_requires_user check (
+    verification_status <> 'verified'
+    or
+    (verified_by is not null and verified_at is not null)
+  )
 );
 
 create table public.outbound_package_documents (
@@ -204,26 +332,69 @@ create table public.outbound_package_reviews (
   decision public.package_review_decision not null,
   comments text,
   created_at timestamptz not null default now(),
-  constraint final_send_review_reserved check (review_type <> 'final_send_review')
+
+  constraint final_send_review_reserved check (
+    review_type <> 'final_send_review'
+  )
 );
 
-create index matter_documents_matter_idx on public.matter_documents (matter_id, status, visibility);
-create index matter_documents_version_group_idx on public.matter_documents (version_group_id, version_number desc);
-create index evidence_document_links_document_idx on public.evidence_document_links (document_id);
-create index document_templates_type_idx on public.document_templates (template_type, is_active);
-create index document_template_versions_template_idx on public.document_template_versions (template_id, status, version_number desc);
-create index outbound_packages_matter_idx on public.outbound_packages (matter_id, status, updated_at desc);
-create index outbound_packages_queue_idx on public.outbound_packages (status, response_deadline, updated_at desc);
-create index outbound_package_recipients_package_idx on public.outbound_package_recipients (package_id, verification_status);
-create index outbound_package_documents_package_idx on public.outbound_package_documents (package_id, sort_order);
-create index outbound_package_validations_package_idx on public.outbound_package_validations (package_id, status, severity);
-create index outbound_package_reviews_package_idx on public.outbound_package_reviews (package_id, created_at desc);
+create index matter_documents_matter_idx
+  on public.matter_documents (matter_id, status, visibility);
 
-create trigger matter_documents_updated_at before update on public.matter_documents for each row execute function public.set_updated_at();
-create trigger document_templates_updated_at before update on public.document_templates for each row execute function public.set_updated_at();
-create trigger outbound_packages_updated_at before update on public.outbound_packages for each row execute function public.set_updated_at();
-create trigger outbound_package_recipients_updated_at before update on public.outbound_package_recipients for each row execute function public.set_updated_at();
-create trigger outbound_package_validations_updated_at before update on public.outbound_package_validations for each row execute function public.set_updated_at();
+create index matter_documents_version_group_idx
+  on public.matter_documents (version_group_id, version_number desc);
+
+create index evidence_document_links_document_idx
+  on public.evidence_document_links (document_id);
+
+create index document_templates_type_idx
+  on public.document_templates (template_type, is_active);
+
+create index document_template_versions_template_idx
+  on public.document_template_versions (template_id, status, version_number desc);
+
+create index outbound_packages_matter_idx
+  on public.outbound_packages (matter_id, status, updated_at desc);
+
+create index outbound_packages_queue_idx
+  on public.outbound_packages (status, response_deadline, updated_at desc);
+
+create index outbound_package_recipients_package_idx
+  on public.outbound_package_recipients (package_id, verification_status);
+
+create index outbound_package_documents_package_idx
+  on public.outbound_package_documents (package_id, sort_order);
+
+create index outbound_package_validations_package_idx
+  on public.outbound_package_validations (package_id, status, severity);
+
+create index outbound_package_reviews_package_idx
+  on public.outbound_package_reviews (package_id, created_at desc);
+
+create trigger matter_documents_updated_at
+before update on public.matter_documents
+for each row
+execute function public.set_updated_at();
+
+create trigger document_templates_updated_at
+before update on public.document_templates
+for each row
+execute function public.set_updated_at();
+
+create trigger outbound_packages_updated_at
+before update on public.outbound_packages
+for each row
+execute function public.set_updated_at();
+
+create trigger outbound_package_recipients_updated_at
+before update on public.outbound_package_recipients
+for each row
+execute function public.set_updated_at();
+
+create trigger outbound_package_validations_updated_at
+before update on public.outbound_package_validations
+for each row
+execute function public.set_updated_at();
 
 create or replace function public.can_access_document(document_uuid uuid)
 returns boolean
@@ -239,7 +410,7 @@ as $$
       and public.can_access_matter(d.matter_id)
       and (
         d.visibility <> 'restricted'
-        or public.current_profile_role() in ('admin','partner','attorney')
+        or public.current_profile_role() in ('admin', 'partner', 'attorney')
       )
   )
 $$;
@@ -254,7 +425,8 @@ as $$
   select exists (
     select 1
     from public.outbound_packages p
-    where p.id = package_uuid and public.can_access_matter(p.matter_id)
+    where p.id = package_uuid
+      and public.can_access_matter(p.matter_id)
   )
 $$;
 
@@ -268,55 +440,233 @@ alter table public.outbound_package_documents enable row level security;
 alter table public.outbound_package_validations enable row level security;
 alter table public.outbound_package_reviews enable row level security;
 
-create policy "matter_documents_select_by_matter" on public.matter_documents for select to authenticated using (public.can_access_document(id));
-create policy "matter_documents_insert_by_matter" on public.matter_documents for insert to authenticated with check (public.can_access_matter(matter_id) and public.current_profile_role() in ('admin','partner','attorney','staff'));
-create policy "matter_documents_update_by_matter" on public.matter_documents for update to authenticated using (public.can_access_matter(matter_id) and public.current_profile_role() in ('admin','partner','attorney','staff')) with check (public.can_access_matter(matter_id));
+create policy "matter_documents_select_by_matter"
+on public.matter_documents
+for select
+to authenticated
+using (
+  public.can_access_document(id)
+);
 
-create policy "evidence_document_links_select_by_matter" on public.evidence_document_links for select to authenticated using (
+create policy "matter_documents_insert_by_matter"
+on public.matter_documents
+for insert
+to authenticated
+with check (
+  public.can_access_matter(matter_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+);
+
+create policy "matter_documents_update_by_matter"
+on public.matter_documents
+for update
+to authenticated
+using (
+  public.can_access_matter(matter_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+)
+with check (
+  public.can_access_matter(matter_id)
+);
+
+create policy "evidence_document_links_select_by_matter"
+on public.evidence_document_links
+for select
+to authenticated
+using (
   exists (
     select 1
     from public.evidence_items e
-    join public.matter_documents d on d.id = document_id
-    where e.id = evidence_item_id and e.matter_id = d.matter_id and public.can_access_matter(e.matter_id)
-  )
-);
-create policy "evidence_document_links_write_by_matter" on public.evidence_document_links for all to authenticated using (
-  public.current_profile_role() in ('admin','partner','attorney','staff')
-  and exists (
-    select 1
-    from public.evidence_items e
-    join public.matter_documents d on d.id = document_id
-    where e.id = evidence_item_id and e.matter_id = d.matter_id and public.can_access_matter(e.matter_id)
-  )
-) with check (
-  public.current_profile_role() in ('admin','partner','attorney','staff')
-  and exists (
-    select 1
-    from public.evidence_items e
-    join public.matter_documents d on d.id = document_id
-    where e.id = evidence_item_id and e.matter_id = d.matter_id and public.can_access_matter(e.matter_id)
+    join public.matter_documents d
+      on d.id = document_id
+    where e.id = evidence_item_id
+      and e.matter_id = d.matter_id
+      and public.can_access_matter(e.matter_id)
   )
 );
 
-create policy "document_templates_select_internal" on public.document_templates for select to authenticated using (public.current_profile_role() is not null);
-create policy "document_templates_manage_admin_partner" on public.document_templates for all to authenticated using (public.current_profile_role() in ('admin','partner')) with check (public.current_profile_role() in ('admin','partner'));
-create policy "document_template_versions_select_internal" on public.document_template_versions for select to authenticated using (public.current_profile_role() is not null);
-create policy "document_template_versions_manage_admin_partner" on public.document_template_versions for all to authenticated using (public.current_profile_role() in ('admin','partner')) with check (public.current_profile_role() in ('admin','partner'));
+create policy "evidence_document_links_write_by_matter"
+on public.evidence_document_links
+for all
+to authenticated
+using (
+  public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+  and exists (
+    select 1
+    from public.evidence_items e
+    join public.matter_documents d
+      on d.id = document_id
+    where e.id = evidence_item_id
+      and e.matter_id = d.matter_id
+      and public.can_access_matter(e.matter_id)
+  )
+)
+with check (
+  public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+  and exists (
+    select 1
+    from public.evidence_items e
+    join public.matter_documents d
+      on d.id = document_id
+    where e.id = evidence_item_id
+      and e.matter_id = d.matter_id
+      and public.can_access_matter(e.matter_id)
+  )
+);
 
-create policy "outbound_packages_select_by_matter" on public.outbound_packages for select to authenticated using (public.can_access_package(id));
-create policy "outbound_packages_insert_by_matter" on public.outbound_packages for insert to authenticated with check (public.can_access_matter(matter_id) and public.current_profile_role() in ('admin','partner','attorney','staff'));
-create policy "outbound_packages_update_by_matter" on public.outbound_packages for update to authenticated using (public.can_access_package(id) and public.current_profile_role() in ('admin','partner','attorney','staff')) with check (public.can_access_matter(matter_id));
+create policy "document_templates_select_internal"
+on public.document_templates
+for select
+to authenticated
+using (
+  public.current_profile_role() is not null
+);
 
-create policy "package_recipients_access_by_package" on public.outbound_package_recipients for select to authenticated using (public.can_access_package(package_id));
-create policy "package_recipients_write_by_package" on public.outbound_package_recipients for all to authenticated using (public.can_access_package(package_id) and public.current_profile_role() in ('admin','partner','attorney','staff')) with check (public.can_access_package(package_id));
-create policy "package_documents_access_by_package" on public.outbound_package_documents for select to authenticated using (public.can_access_package(package_id));
-create policy "package_documents_write_by_package" on public.outbound_package_documents for all to authenticated using (public.can_access_package(package_id) and public.can_access_document(document_id) and public.current_profile_role() in ('admin','partner','attorney','staff')) with check (public.can_access_package(package_id) and public.can_access_document(document_id));
-create policy "package_validations_access_by_package" on public.outbound_package_validations for select to authenticated using (public.can_access_package(package_id));
-create policy "package_validations_write_by_package" on public.outbound_package_validations for all to authenticated using (public.can_access_package(package_id) and public.current_profile_role() in ('admin','partner','attorney','staff')) with check (public.can_access_package(package_id));
-create policy "package_reviews_access_by_package" on public.outbound_package_reviews for select to authenticated using (public.can_access_package(package_id));
-create policy "package_reviews_write_attorneys" on public.outbound_package_reviews for insert to authenticated with check (public.can_access_package(package_id) and public.current_profile_role() in ('admin','partner','attorney','staff'));
+create policy "document_templates_manage_admin_partner"
+on public.document_templates
+for all
+to authenticated
+using (
+  public.current_profile_role() in ('admin', 'partner')
+)
+with check (
+  public.current_profile_role() in ('admin', 'partner')
+);
 
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+create policy "document_template_versions_select_internal"
+on public.document_template_versions
+for select
+to authenticated
+using (
+  public.current_profile_role() is not null
+);
+
+create policy "document_template_versions_manage_admin_partner"
+on public.document_template_versions
+for all
+to authenticated
+using (
+  public.current_profile_role() in ('admin', 'partner')
+)
+with check (
+  public.current_profile_role() in ('admin', 'partner')
+);
+
+create policy "outbound_packages_select_by_matter"
+on public.outbound_packages
+for select
+to authenticated
+using (
+  public.can_access_package(id)
+);
+
+create policy "outbound_packages_insert_by_matter"
+on public.outbound_packages
+for insert
+to authenticated
+with check (
+  public.can_access_matter(matter_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+);
+
+create policy "outbound_packages_update_by_matter"
+on public.outbound_packages
+for update
+to authenticated
+using (
+  public.can_access_package(id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+)
+with check (
+  public.can_access_matter(matter_id)
+);
+
+create policy "package_recipients_access_by_package"
+on public.outbound_package_recipients
+for select
+to authenticated
+using (
+  public.can_access_package(package_id)
+);
+
+create policy "package_recipients_write_by_package"
+on public.outbound_package_recipients
+for all
+to authenticated
+using (
+  public.can_access_package(package_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+)
+with check (
+  public.can_access_package(package_id)
+);
+
+create policy "package_documents_access_by_package"
+on public.outbound_package_documents
+for select
+to authenticated
+using (
+  public.can_access_package(package_id)
+);
+
+create policy "package_documents_write_by_package"
+on public.outbound_package_documents
+for all
+to authenticated
+using (
+  public.can_access_package(package_id)
+  and public.can_access_document(document_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+)
+with check (
+  public.can_access_package(package_id)
+  and public.can_access_document(document_id)
+);
+
+create policy "package_validations_access_by_package"
+on public.outbound_package_validations
+for select
+to authenticated
+using (
+  public.can_access_package(package_id)
+);
+
+create policy "package_validations_write_by_package"
+on public.outbound_package_validations
+for all
+to authenticated
+using (
+  public.can_access_package(package_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+)
+with check (
+  public.can_access_package(package_id)
+);
+
+create policy "package_reviews_access_by_package"
+on public.outbound_package_reviews
+for select
+to authenticated
+using (
+  public.can_access_package(package_id)
+);
+
+create policy "package_reviews_write_attorneys"
+on public.outbound_package_reviews
+for insert
+to authenticated
+with check (
+  public.can_access_package(package_id)
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
+);
+
+insert into storage.buckets (
+  id,
+  name,
+  public,
+  file_size_limit,
+  allowed_mime_types
+)
 values (
   'matter-documents',
   'matter-documents',
@@ -331,19 +681,30 @@ values (
   ]
 )
 on conflict (id) do update
-set public = false,
-    file_size_limit = excluded.file_size_limit,
-    allowed_mime_types = excluded.allowed_mime_types;
+set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
-create policy "matter_document_objects_select_authorized" on storage.objects for select to authenticated using (
+create policy "matter_document_objects_select_authorized"
+on storage.objects
+for select
+to authenticated
+using (
   bucket_id = 'matter-documents'
   and exists (
     select 1
     from public.matter_documents d
-    where d.storage_path = name and public.can_access_document(d.id)
+    where d.storage_path = name
+      and public.can_access_document(d.id)
   )
 );
-create policy "matter_document_objects_insert_authorized" on storage.objects for insert to authenticated with check (
+
+create policy "matter_document_objects_insert_authorized"
+on storage.objects
+for insert
+to authenticated
+with check (
   bucket_id = 'matter-documents'
-  and public.current_profile_role() in ('admin','partner','attorney','staff')
+  and public.current_profile_role() in ('admin', 'partner', 'attorney', 'staff')
 );

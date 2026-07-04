@@ -113,7 +113,7 @@ export function DocumentUploadPanel({ matterId, evidence }: DocumentUploadPanelP
           <select className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm" name="evidenceItemId" defaultValue="">
             <option value="">Do not link now</option>
             {evidence.map((item) => (
-              <option key={item.id} value={item.id}>{item.evidenceType.replaceAll("_", " ")} - {item.status}</option>
+              <option key={item.id} value={item.id}>{formatEvidenceLabel(item.evidenceType)} - {item.status.replaceAll("_", " ")}</option>
             ))}
           </select>
         </label>
@@ -128,6 +128,15 @@ export function DocumentUploadPanel({ matterId, evidence }: DocumentUploadPanelP
       </div>
     </form>
   );
+}
+
+function formatEvidenceLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function formatBytes(value: number) {

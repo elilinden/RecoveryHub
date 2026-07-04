@@ -58,10 +58,22 @@ function normalizeAmount(value: string | undefined) {
   return value && value.trim() ? value : "0.00";
 }
 
+function uniqueIds(ids: Array<string | undefined>) {
+  return [...new Set(ids.map((id) => id?.trim() ?? "").filter(Boolean))];
+}
+
+function assignedAttorneyIds(data: IntakeFormData["stepOne"]) {
+  return uniqueIds([...(data.assignedAttorneyIds ?? []), data.assignedAttorneyId]);
+}
+
+function assignedStaffIds(data: IntakeFormData["stepOne"]) {
+  return uniqueIds([...(data.assignedStaffIds ?? []), data.assignedStaffId]);
+}
+
 type MatterAssignmentRow = {
   matter_id: string;
   profile_id: string;
-  assignment_role: "lead_attorney" | "assigned_staff" | "supervising_partner";
+  assignment_role: "lead_attorney" | "assigned_staff";
 };
 
 type MatterPartyRow = {
@@ -109,9 +121,8 @@ async function validateRelationships(data: IntakeFormData) {
 
   const responsibleUserId =
     data.stepThree.nextActionAssignedTo ||
-    data.stepOne.assignedAttorneyId ||
-    data.stepOne.assignedStaffId ||
-    data.stepOne.supervisingPartnerId;
+    assignedAttorneyIds(data.stepOne)[0] ||
+    assignedStaffIds(data.stepOne)[0];
 
   if (!options.users.some((user) => user.id === responsibleUserId)) {
     return "Select an active internal user for the next action.";
@@ -199,6 +210,8 @@ export async function saveIntakeDraftAction(input: {
 
   const supabase = await createClient();
   const now = new Date().toISOString();
+  const attorneyIds = assignedAttorneyIds(input.data.stepOne);
+  const staffIds = assignedStaffIds(input.data.stepOne);
   const matterValues = {
     carrier_id: input.data.stepOne.carrierId,
     assigned_adjuster_id: input.data.stepOne.assignedAdjusterId || null,
@@ -212,8 +225,8 @@ export async function saveIntakeDraftAction(input: {
     date_of_loss: input.data.stepOne.dateOfLoss || null,
     jurisdiction: input.data.stepOne.jurisdiction || null,
     venue: input.data.stepOne.venue || null,
-    assigned_attorney_id: input.data.stepOne.assignedAttorneyId || null,
-    assigned_staff_id: input.data.stepOne.assignedStaffId || null,
+    assigned_attorney_id: attorneyIds[0] ?? null,
+    assigned_staff_id: staffIds[0] ?? null,
     created_by: permission.profile.id,
     intake_status: input.step > 1 ? "in_progress" : "draft",
     current_intake_step: Math.max(1, Math.min(3, input.step)),
@@ -307,6 +320,8 @@ export async function completeIntakeAction(input: {
 
   const supabase = await createClient();
   const now = new Date().toISOString();
+  const attorneyIds = assignedAttorneyIds(input.data.stepOne);
+  const staffIds = assignedStaffIds(input.data.stepOne);
   const nextActionTitle =
     input.data.stepThree.nextAction === "Complete initial review" && input.data.stepThree.customNextAction
       ? input.data.stepThree.customNextAction
@@ -342,8 +357,8 @@ export async function completeIntakeAction(input: {
     statute_deadline_verified: input.data.stepThree.verifyStatuteDeadline,
     statute_deadline_verified_by: input.data.stepThree.verifyStatuteDeadline ? permission.profile.id : null,
     statute_deadline_verified_at: input.data.stepThree.verifyStatuteDeadline ? now : null,
-    assigned_attorney_id: input.data.stepOne.assignedAttorneyId || null,
-    assigned_staff_id: input.data.stepOne.assignedStaffId || null,
+    assigned_attorney_id: attorneyIds[0] ?? null,
+    assigned_staff_id: staffIds[0] ?? null,
     internal_notes: input.data.stepThree.internalNotes || null,
     created_by: permission.profile.id,
     intake_status: "complete",
@@ -366,21 +381,12 @@ export async function completeIntakeAction(input: {
   const matterId = String(matter.id);
 
   const assignmentRows: MatterAssignmentRow[] = [
-    input.data.stepOne.assignedAttorneyId
-      ? { matter_id: matterId, profile_id: input.data.stepOne.assignedAttorneyId, assignment_role: "lead_attorney" }
-      : null,
-    input.data.stepOne.assignedStaffId
-      ? { matter_id: matterId, profile_id: input.data.stepOne.assignedStaffId, assignment_role: "assigned_staff" }
-      : null,
-    input.data.stepOne.supervisingPartnerId
-      ? { matter_id: matterId, profile_id: input.data.stepOne.supervisingPartnerId, assignment_role: "supervising_partner" }
-      : null,
-  ].filter((row): row is MatterAssignmentRow => row !== null);
+    ...attorneyIds.map((profileId) => ({ matter_id: matterId, profile_id: profileId, assignment_role: "lead_attorney" as const })),
+    ...staffIds.map((profileId) => ({ matter_id: matterId, profile_id: profileId, assignment_role: "assigned_staff" as const })),
+  ];
 
   await Promise.all([
-    assignmentRows.length > 0
-      ? supabase.from("matter_assignments").upsert(assignmentRows, { onConflict: "matter_id,profile_id,assignment_role" })
-      : Promise.resolve(),
+    supabase.from("matter_assignments").delete().eq("matter_id", matterId),
     supabase.from("evidence_items").delete().eq("matter_id", matterId),
     supabase.from("matter_parties").delete().eq("matter_id", matterId),
   ]);
@@ -446,6 +452,9 @@ export async function completeIntakeAction(input: {
     .maybeSingle();
 
   await Promise.all([
+    assignmentRows.length > 0
+      ? supabase.from("matter_assignments").insert(assignmentRows)
+      : Promise.resolve(),
     evidenceRows.length > 0 ? supabase.from("evidence_items").insert(evidenceRows) : Promise.resolve(),
     partyRows.length > 0 ? supabase.from("matter_parties").insert(partyRows) : Promise.resolve(),
     supabase.from("deadlines").insert({

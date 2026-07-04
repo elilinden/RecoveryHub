@@ -25,6 +25,7 @@ import {
   assessmentOptions,
   calculateSuggestedAmountSought,
   createEmptyIntake,
+  evidenceTypeOptions,
   evidenceStatusOptions,
   insuranceStatusOptions,
   matterTypeOptions,
@@ -36,7 +37,7 @@ import {
   yesNoUnknownOptions,
   type IntakeFormData,
 } from "@/lib/intake/schema";
-import { filterContactsByCarrier, type IntakeCarrierContact, type IntakeOptions } from "@/lib/intake/types";
+import { filterContactsByCarrier, type IntakeCarrierContact, type IntakeOptions, type IntakeUser } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
 
 type NewMatterIntakeProps = {
@@ -91,6 +92,58 @@ function textAreaClass(error?: string) {
   );
 }
 
+function formatEvidenceType(value: string) {
+  const option = evidenceTypeOptions.find((item) => item.value === value);
+  if (option) return option.label;
+  return value
+    .replaceAll("_", " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function normalizeIdList(ids: Array<string | undefined>) {
+  return [...new Set(ids.map((id) => id?.trim() ?? "").filter(Boolean))];
+}
+
+function userNames(users: IntakeUser[], ids: string[]) {
+  const names = ids
+    .map((id) => users.find((user) => user.id === id)?.fullName)
+    .filter((name): name is string => Boolean(name));
+  return names.length > 0 ? names.join(", ") : "Not assigned";
+}
+
+function normalizeIntakeData(input?: Partial<IntakeFormData> | null): IntakeFormData {
+  const empty = createEmptyIntake();
+  if (!input) return empty;
+  const stepOne = { ...empty.stepOne, ...(input.stepOne ?? {}) };
+  const stepTwo = { ...empty.stepTwo, ...(input.stepTwo ?? {}) };
+  const stepThree = { ...empty.stepThree, ...(input.stepThree ?? {}) };
+  const assignedAttorneyIds = normalizeIdList([...(stepOne.assignedAttorneyIds ?? []), stepOne.assignedAttorneyId]);
+  const assignedStaffIds = normalizeIdList([...(stepOne.assignedStaffIds ?? []), stepOne.assignedStaffId]);
+
+  return {
+    ...empty,
+    ...input,
+    step: input.step ?? empty.step,
+    stepOne: {
+      ...stepOne,
+      assignedAttorneyId: assignedAttorneyIds[0] ?? "",
+      assignedAttorneyIds,
+      assignedStaffId: assignedStaffIds[0] ?? "",
+      assignedStaffIds,
+      supervisingPartnerId: "",
+    },
+    stepTwo: {
+      ...stepTwo,
+      evidence: stepTwo.evidence ?? [],
+      parties: stepTwo.parties ?? [],
+    },
+    stepThree,
+  };
+}
+
 function statusLabel(status: SaveState, lastSavedAt?: string) {
   if (status === "saving") return "Saving...";
   if (status === "error") return "Unable to save";
@@ -99,17 +152,17 @@ function statusLabel(status: SaveState, lastSavedAt?: string) {
 }
 
 function getInitialIntakeData(initialData?: IntakeFormData | null) {
-  if (initialData) return initialData;
-  if (typeof window === "undefined") return createEmptyIntake();
+  if (initialData) return normalizeIntakeData(initialData);
+  if (typeof window === "undefined") return normalizeIntakeData();
 
   const saved = window.localStorage.getItem(localStorageKey);
-  if (!saved) return createEmptyIntake();
+  if (!saved) return normalizeIntakeData();
 
   try {
-    return JSON.parse(saved) as IntakeFormData;
+    return normalizeIntakeData(JSON.parse(saved) as Partial<IntakeFormData>);
   } catch {
     window.localStorage.removeItem(localStorageKey);
-    return createEmptyIntake();
+    return normalizeIntakeData();
   }
 }
 
@@ -346,6 +399,43 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
     }));
   }
 
+  function addEvidenceItem(evidenceType: string) {
+    const trimmed = evidenceType.trim();
+    if (!trimmed) return;
+    setData((current) => {
+      const exists = current.stepTwo.evidence.some((item) => item.evidenceType.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return current;
+      return {
+        ...current,
+        stepTwo: {
+          ...current.stepTwo,
+          evidence: [
+            ...current.stepTwo.evidence,
+            {
+              evidenceType: trimmed,
+              status: "requested",
+              notes: "",
+            },
+          ],
+        },
+      };
+    });
+    setHasInteracted(true);
+    setDirty(true);
+  }
+
+  function removeEvidenceItem(index: number) {
+    setData((current) => ({
+      ...current,
+      stepTwo: {
+        ...current.stepTwo,
+        evidence: current.stepTwo.evidence.filter((_, evidenceIndex) => evidenceIndex !== index),
+      },
+    }));
+    setHasInteracted(true);
+    setDirty(true);
+  }
+
   return (
     <div className="space-y-6">
       <StepIndicator step={step} setStep={(nextStep) => nextStep < step && setStep(nextStep)} />
@@ -400,6 +490,8 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
                     errors={fieldErrors}
                     options={options}
                     suggestedAmount={suggestedAmount}
+                    addEvidence={addEvidenceItem}
+                    removeEvidence={removeEvidenceItem}
                     updateEvidence={updateEvidence}
                     updateParty={updateParty}
                     updateStepTwo={updateStepTwo}
@@ -551,8 +643,19 @@ function MatterDetailsStep(props: {
   const { data, errors, options, selectedAdjuster, adjusters, supervisors, update } = props;
   const attorneys = options.users.filter((user) => ["admin", "partner", "attorney"].includes(user.role));
   const staff = options.users.filter((user) => user.role === "staff");
-  const partners = options.users.filter((user) => user.role === "partner");
   const responsibleUsers = options.users.filter((user) => ["admin", "partner", "attorney", "staff"].includes(user.role));
+  const assignedAttorneyIds = normalizeIdList([...(data.stepOne.assignedAttorneyIds ?? []), data.stepOne.assignedAttorneyId]);
+  const assignedStaffIds = normalizeIdList([...(data.stepOne.assignedStaffIds ?? []), data.stepOne.assignedStaffId]);
+
+  function updateAttorneyIds(nextIds: string[]) {
+    update("assignedAttorneyIds", nextIds);
+    update("assignedAttorneyId", nextIds[0] ?? "");
+  }
+
+  function updateStaffIds(nextIds: string[]) {
+    update("assignedStaffIds", nextIds);
+    update("assignedStaffId", nextIds[0] ?? "");
+  }
 
   return (
     <div className="space-y-8">
@@ -650,40 +753,104 @@ function MatterDetailsStep(props: {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-foreground">Firm Assignment</h3>
         {responsibleUsers.length === 0 ? <EmptyState description="No eligible active users are available for assignment." title="No eligible assignees" /> : null}
-        <div className="grid gap-4 md:grid-cols-3">
-          <Field error={errors.assignedAttorneyId} required label="Assigned attorney">
-            <select className={selectClass(errors.assignedAttorneyId)} value={data.stepOne.assignedAttorneyId ?? ""} onChange={(event) => update("assignedAttorneyId", event.target.value)}>
-              <option value="">Select attorney</option>
-              {attorneys.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName} {user.jobTitle ? `- ${user.jobTitle}` : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Assigned staff member">
-            <select className={selectClass()} value={data.stepOne.assignedStaffId ?? ""} onChange={(event) => update("assignedStaffId", event.target.value)}>
-              <option value="">Optional staff</option>
-              {staff.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName} {user.jobTitle ? `- ${user.jobTitle}` : ""}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Supervising partner">
-            <select className={selectClass()} value={data.stepOne.supervisingPartnerId ?? ""} onChange={(event) => update("supervisingPartnerId", event.target.value)}>
-              <option value="">Optional partner</option>
-              {partners.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName}
-                </option>
-              ))}
-            </select>
-          </Field>
+        <div className="grid gap-4 md:grid-cols-2">
+          <UserCheckboxGroup
+            emptyLabel="No attorneys are available."
+            error={errors.assignedAttorneyIds ?? errors.assignedAttorneyId}
+            label="Assigned attorneys"
+            required
+            selectedIds={assignedAttorneyIds}
+            users={attorneys}
+            onChange={updateAttorneyIds}
+          />
+          <UserCheckboxGroup
+            emptyLabel="No staff users are available."
+            label="Assigned staff members"
+            selectedIds={assignedStaffIds}
+            users={staff}
+            onChange={updateStaffIds}
+          />
         </div>
       </section>
     </div>
+  );
+}
+
+function UserCheckboxGroup({
+  emptyLabel,
+  error,
+  label,
+  onChange,
+  required,
+  selectedIds,
+  users,
+}: {
+  emptyLabel: string;
+  error?: string;
+  label: string;
+  onChange: (ids: string[]) => void;
+  required?: boolean;
+  selectedIds: string[];
+  users: IntakeUser[];
+}) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium text-foreground">
+        {label}
+        {required ? (
+          <span aria-hidden="true" className="ml-0.5 text-[var(--urgent)]">
+            *
+          </span>
+        ) : null}
+      </legend>
+      <div
+        className={cn(
+          "max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-2 shadow-sm focus-within:ring-3 focus-within:ring-ring/25",
+          error && "border-[color:var(--urgent)]"
+        )}
+      >
+        {users.length === 0 ? (
+          <p className="px-2 py-3 text-sm text-muted-foreground">{emptyLabel}</p>
+        ) : (
+          <div className="grid gap-1">
+            {users.map((user) => {
+              const checked = selectedIds.includes(user.id);
+              return (
+                <label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted",
+                    checked && "bg-secondary text-foreground"
+                  )}
+                  key={user.id}
+                >
+                  <input
+                    checked={checked}
+                    className="size-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    type="checkbox"
+                    onChange={(event) => {
+                      const nextIds = event.target.checked
+                        ? normalizeIdList([...selectedIds, user.id])
+                        : selectedIds.filter((id) => id !== user.id);
+                      onChange(nextIds);
+                    }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{user.fullName}</span>
+                    {user.jobTitle ? <span className="block truncate text-xs text-muted-foreground">{user.jobTitle}</span> : null}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {error ? <p className="text-sm text-[var(--urgent)]">{error}</p> : null}
+      {selectedIds.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Primary: {users.find((user) => user.id === selectedIds[0])?.fullName ?? "First selected user"}
+        </p>
+      ) : null}
+    </fieldset>
   );
 }
 
@@ -765,13 +932,19 @@ function RecoveryDetailsStep(props: {
   errors: Record<string, string>;
   options: IntakeOptions;
   suggestedAmount: string;
+  addEvidence: (evidenceType: string) => void;
+  removeEvidence: (index: number) => void;
   updateStepTwo: <K extends keyof IntakeFormData["stepTwo"]>(key: K, value: IntakeFormData["stepTwo"][K]) => void;
   updateParty: (index: number, key: string, value: string | boolean) => void;
   updateEvidence: (index: number, key: string, value: string) => void;
   onAddParty: (mode: "contact" | "organization") => void;
 }) {
-  const { data, options, suggestedAmount, updateStepTwo, updateParty, updateEvidence, onAddParty } = props;
+  const { data, options, suggestedAmount, addEvidence, removeEvidence, updateStepTwo, updateParty, updateEvidence, onAddParty } = props;
   const showCoverage = data.stepTwo.insuranceStatus === "confirmed_coverage" || data.stepTwo.insuranceStatus === "identified_unconfirmed";
+  const [selectedEvidenceType, setSelectedEvidenceType] = useState("");
+  const [customEvidenceType, setCustomEvidenceType] = useState("");
+  const selectedEvidenceTypes = new Set(data.stepTwo.evidence.map((item) => item.evidenceType));
+  const availableEvidenceOptions = evidenceTypeOptions.filter((option) => !selectedEvidenceTypes.has(option.value));
 
   return (
     <div className="space-y-8">
@@ -911,18 +1084,73 @@ function RecoveryDetailsStep(props: {
       </section>
 
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-foreground">Evidence Checklist</h3>
-        <div className="grid gap-3">
-          {data.stepTwo.evidence.map((item, index) => (
-            <div className="grid gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-[1fr_180px_1fr]" key={item.evidenceType}>
-              <p className="text-sm font-medium text-foreground">{item.evidenceType.replaceAll("_", " ")}</p>
-              <select className={selectClass()} value={item.status} onChange={(event) => updateEvidence(index, "status", event.target.value)}>
-                {evidenceStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <Input placeholder="Optional note" value={item.notes ?? ""} onChange={(event) => updateEvidence(index, "notes", event.target.value)} />
-            </div>
-          ))}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Evidence Checklist</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Add only the evidence items that matter for this recovery.</p>
+          </div>
+          <div className="grid gap-2 sm:min-w-[360px] sm:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="sr-only" htmlFor="evidence-type-picker">Evidence item</label>
+            <select
+              className={selectClass()}
+              id="evidence-type-picker"
+              value={selectedEvidenceType}
+              onChange={(event) => setSelectedEvidenceType(event.target.value)}
+            >
+              <option value="">Choose evidence to add</option>
+              {availableEvidenceOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <Button
+              disabled={!selectedEvidenceType}
+              type="button"
+              variant="outline"
+              onClick={() => {
+                addEvidence(selectedEvidenceType);
+                setSelectedEvidenceType("");
+              }}
+            >
+              Add
+            </Button>
+            <label className="sr-only" htmlFor="custom-evidence-type">Custom evidence item</label>
+            <Input
+              id="custom-evidence-type"
+              placeholder="Custom evidence item"
+              value={customEvidenceType}
+              onChange={(event) => setCustomEvidenceType(event.target.value)}
+            />
+            <Button
+              disabled={!customEvidenceType.trim()}
+              type="button"
+              variant="outline"
+              onClick={() => {
+                addEvidence(customEvidenceType);
+                setCustomEvidenceType("");
+              }}
+            >
+              Add Custom
+            </Button>
+          </div>
         </div>
+        {data.stepTwo.evidence.length === 0 ? (
+          <EmptyState description="Choose standard evidence items or add a custom item when this matter needs one." title="No evidence items selected" />
+        ) : (
+          <div className="grid gap-3">
+            {data.stepTwo.evidence.map((item, index) => (
+              <div className="grid gap-3 rounded-lg border border-border bg-background p-4 md:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto]" key={`${item.evidenceType}-${index}`}>
+                <p className="self-center text-sm font-medium text-foreground">{formatEvidenceType(item.evidenceType)}</p>
+                <select className={selectClass()} value={item.status} onChange={(event) => updateEvidence(index, "status", event.target.value)}>
+                  {evidenceStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <Input placeholder="Optional note" value={item.notes ?? ""} onChange={(event) => updateEvidence(index, "notes", event.target.value)} />
+                <Button type="button" variant="outline" onClick={() => removeEvidence(index)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {data.stepOne.matterType === "health_plan_recovery" ? (
@@ -1105,7 +1333,8 @@ function IntakeSummary(props: {
   hasInteracted: boolean;
 }) {
   const { data, selectedCarrier, selectedAdjuster, unresolvedIssues, options, hasInteracted } = props;
-  const attorney = options.users.find((user) => user.id === data.stepOne.assignedAttorneyId);
+  const attorneyLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedAttorneyIds ?? []), data.stepOne.assignedAttorneyId]));
+  const staffLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedStaffIds ?? []), data.stepOne.assignedStaffId]));
   const matterLabel = data.stepOne.matterName || "New matter";
   const issueLabel = !hasInteracted
     ? "Fill in the fields to see a routing summary."
@@ -1120,7 +1349,8 @@ function IntakeSummary(props: {
         <div><dt className="text-muted-foreground">Carrier</dt><dd className="font-medium text-foreground">{selectedCarrier?.name ?? "Not selected"}</dd></div>
         <div><dt className="text-muted-foreground">Claim</dt><dd className="font-medium text-foreground">{data.stepOne.carrierClaimNumber || "Not entered"}</dd></div>
         <div><dt className="text-muted-foreground">Adjuster</dt><dd className="font-medium text-foreground">{selectedAdjuster?.fullName ?? "Not assigned"}</dd></div>
-        <div><dt className="text-muted-foreground">Attorney</dt><dd className="font-medium text-foreground">{attorney?.fullName ?? "Not assigned"}</dd></div>
+        <div><dt className="text-muted-foreground">Attorneys</dt><dd className="font-medium text-foreground">{attorneyLabel}</dd></div>
+        <div><dt className="text-muted-foreground">Staff</dt><dd className="font-medium text-foreground">{staffLabel}</dd></div>
         <div><dt className="text-muted-foreground">Amount sought</dt><dd className="font-medium text-foreground"><CurrencyDisplay value={Number(data.stepTwo.amountSought || 0)} /></dd></div>
         <div><dt className="text-muted-foreground">Next action</dt><dd className="font-medium text-foreground">{data.stepThree.nextAction}</dd></div>
         {data.stepThree.nextActionDueDate ? <div><dt className="text-muted-foreground">Next-action due</dt><dd className="font-medium text-foreground"><DateDisplay value={data.stepThree.nextActionDueDate} /></dd></div> : null}
@@ -1158,7 +1388,8 @@ function IntakeSummary(props: {
 function ReviewSummary({ data, options }: { data: IntakeFormData; options: IntakeOptions }) {
   const carrier = options.carriers.find((item) => item.id === data.stepOne.carrierId);
   const adjuster = options.carrierContacts.find((item) => item.id === data.stepOne.assignedAdjusterId);
-  const attorney = options.users.find((item) => item.id === data.stepOne.assignedAttorneyId);
+  const attorneyLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedAttorneyIds ?? []), data.stepOne.assignedAttorneyId]));
+  const staffLabel = userNames(options.users, normalizeIdList([...(data.stepOne.assignedStaffIds ?? []), data.stepOne.assignedStaffId]));
   const received = data.stepTwo.evidence.filter((item) => item.status === "received");
   const needed = data.stepTwo.evidence.filter((item) => item.status === "missing" || item.status === "requested");
 
@@ -1168,8 +1399,9 @@ function ReviewSummary({ data, options }: { data: IntakeFormData; options: Intak
       <p><span className="text-muted-foreground">Carrier:</span> {carrier?.name ?? "Not selected"}</p>
       <p><span className="text-muted-foreground">Claim:</span> {data.stepOne.carrierClaimNumber}</p>
       <p><span className="text-muted-foreground">Adjuster:</span> {adjuster?.fullName ?? "Not assigned"}</p>
-      <p><span className="text-muted-foreground">Attorney:</span> {attorney?.fullName ?? "Not assigned"}</p>
-      <p><span className="text-muted-foreground">Matter type:</span> {data.stepOne.matterType.replaceAll("_", " ")}</p>
+      <p><span className="text-muted-foreground">Attorneys:</span> {attorneyLabel}</p>
+      <p><span className="text-muted-foreground">Staff:</span> {staffLabel}</p>
+      <p><span className="text-muted-foreground">Matter type:</span> {formatEvidenceType(data.stepOne.matterType)}</p>
       <p><span className="text-muted-foreground">Amount paid:</span> ${data.stepTwo.amountPaid}</p>
       <p><span className="text-muted-foreground">Amount sought:</span> ${data.stepTwo.amountSought}</p>
       <p><span className="text-muted-foreground">Insurance:</span> {data.stepTwo.insuranceStatus.replaceAll("_", " ")}</p>

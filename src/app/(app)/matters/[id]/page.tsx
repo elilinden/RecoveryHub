@@ -39,6 +39,7 @@ import { createSnapshotFromDetail } from "@/lib/triage/types";
 import { loadMatterAssessmentBundle } from "@/lib/recovery-assessment/data";
 import { loadMatterDocumentsAndPackages } from "@/lib/documents-packages/data";
 import { permissionsForRole } from "@/lib/documents-packages/types";
+import type { MatterAssignment } from "@/lib/matters-workspace/types";
 import {
   submitAddMatterEventAction,
   submitArchiveMatterAction,
@@ -80,6 +81,16 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
   const documentPackagePermissions = permissionsForRole(session.profile.role);
   const primaryTriageFlag = getPrimaryTriageFlag(activeTriageFlags);
   const remaining = Math.max(0, matter.amountSought - matter.amountRecovered);
+  const assignedAttorneyNames = assignmentNames(
+    matter.assignments,
+    ["lead attorney", "assigned attorney"],
+    matter.assignedAttorneyName
+  );
+  const assignedStaffNames = assignmentNames(
+    matter.assignments,
+    ["assigned staff"],
+    matter.assignedStaffName
+  );
 
   const editStatusSheet = (
     <EditCurrentStatusSheet
@@ -119,11 +130,8 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
               <Info label="Carrier supervisor" value={matter.carrierSupervisorName ?? "Not assigned"} />
             </Section>
             <Section title="Firm Team">
-              <Info label="Assigned attorney" value={matter.assignedAttorneyName ?? "Not assigned"} />
-              <Info label="Assigned staff" value={matter.assignedStaffName ?? "Not assigned"} />
-              {matter.assignments.map((assignment) => (
-                <Info key={assignment.id} label={assignment.role} value={assignment.profileName} />
-              ))}
+              <Info label="Assigned attorneys" value={assignedAttorneyNames} />
+              <Info label="Assigned staff" value={assignedStaffNames} />
             </Section>
             <Section title="Liability and Insurance">
               <Info label="Insurance status" value={insuranceStatusLabels[matter.insuranceStatus]} />
@@ -600,6 +608,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <dl className="divide-y divide-border rounded-lg bg-secondary/60 px-4">{children}</dl>
     </section>
   );
+}
+
+function assignmentNames(assignments: MatterAssignment[], roleNames: string[], fallback?: string | null) {
+  const normalizedRoles = new Set(roleNames.map((role) => role.toLowerCase()));
+  const names = [
+    fallback,
+    ...assignments
+      .filter((assignment) => normalizedRoles.has(assignment.role.toLowerCase()))
+      .map((assignment) => assignment.profileName),
+  ].filter((name): name is string => Boolean(name));
+  return [...new Set(names)].join(", ") || "Not assigned";
 }
 
 function Info({ label, value }: { label: string; value: ReactNode }) {

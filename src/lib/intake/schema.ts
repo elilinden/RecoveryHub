@@ -119,10 +119,12 @@ export const intakeStepOneSchema = z.object({
   carrierSupervisorId: optionalString,
   assignedAttorneyId: optionalString,
   assignedStaffId: optionalString,
+  assignedAttorneyIds: z.array(idString).default([]),
+  assignedStaffIds: z.array(idString).default([]),
   supervisingPartnerId: optionalString,
-}).refine((value) => Boolean(value.assignedAttorneyId || value.assignedStaffId || value.supervisingPartnerId), {
+}).refine((value) => Boolean(value.assignedAttorneyIds.length || value.assignedAttorneyId || value.assignedStaffIds.length || value.assignedStaffId), {
   message: "Select the attorney or firm user responsible for this matter.",
-  path: ["assignedAttorneyId"],
+  path: ["assignedAttorneyIds"],
 });
 
 export const intakePartySchema = z.object({
@@ -139,7 +141,7 @@ export const intakePartySchema = z.object({
 });
 
 export const intakeEvidenceSchema = z.object({
-  evidenceType: z.enum(optionValues(evidenceTypeOptions)),
+  evidenceType: z.string().trim().min(1, "Enter an evidence item."),
   status: z.enum(optionValues(evidenceStatusOptions)),
   notes: optionalString,
 });
@@ -254,6 +256,8 @@ export function createEmptyIntake(): IntakeFormData {
       carrierSupervisorId: "",
       assignedAttorneyId: "",
       assignedStaffId: "",
+      assignedAttorneyIds: [],
+      assignedStaffIds: [],
       supervisingPartnerId: "",
     },
     stepTwo: {
@@ -273,11 +277,7 @@ export function createEmptyIntake(): IntakeFormData {
       collectabilityAssessment: "unknown",
       liabilitySummary: "",
       parties: [],
-      evidence: evidenceTypeOptions.map((option) => ({
-        evidenceType: option.value,
-        status: "not_applicable",
-        notes: "",
-      })),
+      evidence: [],
     },
     stepThree: {
       statuteDeadline: "",

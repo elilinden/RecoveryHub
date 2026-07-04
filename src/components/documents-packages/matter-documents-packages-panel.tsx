@@ -5,11 +5,9 @@ import { CurrencyDisplay } from "@/components/common/currency-display";
 import { DateDisplay } from "@/components/common/date-display";
 import { EmptyState } from "@/components/common/empty-state";
 import { SectionHeader } from "@/components/common/section-header";
-import { DataTableShell } from "@/components/common/data-table-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { submitCreateExternalDocumentLinkAction, submitCreatePackageAction } from "@/lib/documents-packages/actions";
 import {
   documentTypeLabels,
@@ -31,27 +29,6 @@ type MatterDocumentsPackagesPanelProps = {
   evidence: EvidenceItem[];
   permissions: DocumentPackagePermissions;
 };
-
-const documentColumns = [
-  { key: "title", header: "Document", className: "w-[18rem] min-w-[18rem]" },
-  { key: "type", header: "Type", className: "w-[13rem] min-w-[13rem]" },
-  { key: "date", header: "Date", className: "w-[9rem] min-w-[9rem]" },
-  { key: "version", header: "Version", className: "w-[8rem] min-w-[8rem]" },
-  { key: "source", header: "Source", className: "w-[11rem] min-w-[11rem]" },
-  { key: "scan", header: "Scan", className: "w-[10rem] min-w-[10rem]" },
-  { key: "visibility", header: "Visibility", className: "w-[12rem] min-w-[12rem]" },
-  { key: "actions", header: "Actions", className: "w-[12rem] min-w-[12rem]" },
-];
-
-const packageColumns = [
-  { key: "package", header: "Package", className: "w-[18rem] min-w-[18rem]" },
-  { key: "type", header: "Type", className: "w-[12rem] min-w-[12rem]" },
-  { key: "recipient", header: "Recipient", className: "w-[16rem] min-w-[16rem]" },
-  { key: "status", header: "Status", className: "w-[12rem] min-w-[12rem]" },
-  { key: "amount", header: "Amount", className: "w-[10rem] min-w-[10rem] text-right" },
-  { key: "deadline", header: "Response deadline", className: "w-[11rem] min-w-[11rem]" },
-  { key: "updated", header: "Updated", className: "w-[9rem] min-w-[9rem]" },
-];
 
 export function MatterDocumentsPackagesPanel({
   matterId,
@@ -75,12 +52,8 @@ export function MatterDocumentsPackagesPanel({
             <CardContent className="space-y-4 p-5">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <SectionHeader
-                  description="Upload private files or link externally managed documents. Files remain private and scan status is always visible."
                   title="Document Library"
                 />
-                <div className="rounded-lg border border-[color:var(--warning)]/20 bg-[var(--warning-muted)] px-3 py-2 text-sm text-[var(--warning)]" role="note">
-                  Malware scanning is not configured. New files are not marked clean automatically.
-                </div>
               </div>
               {permissions.canUploadDocuments ? <DocumentUploadPanel evidence={evidence} matterId={matterId} /> : null}
               <ExternalDocumentForm matterId={matterId} />
@@ -90,42 +63,25 @@ export function MatterDocumentsPackagesPanel({
           {documents.length === 0 ? (
             <EmptyState description="Upload or link the first document for this matter." title="No documents have been added" />
           ) : (
-            <>
-              <div className="hidden lg:block">
-                <DataTableShell columns={documentColumns}>
+            <div className="document-list rounded-lg border border-border bg-card shadow-sm">
+              <div className="document-list-desktop" role="table" aria-label="Matter documents">
+                <div className="document-list-header document-list-grid" role="row">
+                  <div role="columnheader">Document</div>
+                  <div role="columnheader">Date &amp; Version</div>
+                  <div role="columnheader">Scan</div>
+                  <div role="columnheader">Visibility</div>
+                  <div role="columnheader">Actions</div>
+                </div>
+                <div role="rowgroup">
                   {documents.map((document) => (
-                    <TableRow className="h-14" key={document.id}>
-                      <TableCell className="min-w-0 px-3 py-2">
-                        <p className="truncate font-medium text-foreground" title={document.title}>{document.title}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground" title={document.displayFilename}>{document.displayFilename}</p>
-                      </TableCell>
-                      <TableCell className="px-3 py-2 text-muted-foreground">{documentTypeLabels[document.documentType]}</TableCell>
-                      <TableCell className="px-3 py-2">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</TableCell>
-                      <TableCell className="px-3 py-2 text-muted-foreground">v{document.versionNumber}</TableCell>
-                      <TableCell className="px-3 py-2 text-muted-foreground">{sourceTypeLabels[document.sourceType]}</TableCell>
-                      <TableCell className="px-3 py-2"><ScanStatusBadge status={document.scanStatus} /></TableCell>
-                      <TableCell className="px-3 py-2"><VisibilityBadge visibility={document.visibility} /></TableCell>
-                      <TableCell className="px-3 py-2">
-                        <div className="flex flex-wrap gap-2">
-                          <Button asChild disabled={!canPreviewDocument(document)} size="sm" variant="outline">
-                            <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">Preview</a>
-                          </Button>
-                          <Button asChild disabled={document.status === "quarantined" || document.scanStatus === "flagged"} size="sm" variant="outline">
-                            <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">
-                              {document.externalUrl ? <ExternalLink aria-hidden="true" className="size-4" /> : null}
-                              {document.externalUrl ? "Open" : "Download"}
-                            </a>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    <DocumentRow document={document} key={document.id} />
                   ))}
-                </DataTableShell>
+                </div>
               </div>
-              <div className="grid gap-3 lg:hidden">
+              <div className="document-list-mobile gap-3 p-3">
                 {documents.map((document) => <DocumentCard document={document} key={document.id} />)}
               </div>
-            </>
+            </div>
           )}
         </div>
       </TabsContent>
@@ -144,18 +100,24 @@ export function MatterDocumentsPackagesPanel({
           {packages.length === 0 ? (
             <EmptyState description="Create a package when the matter is ready for a demand, request, or notice." title="No outbound packages have been created" />
           ) : (
-            <>
-              <div className="hidden lg:block">
-                <DataTableShell columns={packageColumns}>
+            <div className="document-list rounded-lg border border-border bg-card shadow-sm">
+              <div className="document-list-desktop" role="table" aria-label="Matter packages">
+                <div className="document-list-header matter-package-list-grid" role="row">
+                  <div role="columnheader">Package</div>
+                  <div role="columnheader">Recipient &amp; Status</div>
+                  <div role="columnheader">Amount &amp; Deadline</div>
+                  <div role="columnheader">Updated</div>
+                </div>
+                <div role="rowgroup">
                   {packages.map((outboundPackage) => (
                     <PackageRow outboundPackage={outboundPackage} key={outboundPackage.id} />
                   ))}
-                </DataTableShell>
+                </div>
               </div>
-              <div className="grid gap-3 lg:hidden">
+              <div className="document-list-mobile gap-3 p-3">
                 {packages.map((outboundPackage) => <PackageCard outboundPackage={outboundPackage} key={outboundPackage.id} />)}
               </div>
-            </>
+            </div>
           )}
         </div>
       </TabsContent>
@@ -237,6 +199,49 @@ function CreatePackageForm({ matterId, matterAmountSought, templates }: { matter
   );
 }
 
+function DocumentRow({ document }: { document: MatterDocument }) {
+  return (
+    <div className="document-list-row document-list-grid" role="row">
+      <div className="document-list-cell min-w-0" role="cell">
+        <p className="truncate font-medium text-foreground" title={document.title}>{document.title}</p>
+        <p className="mt-1 truncate text-xs text-muted-foreground" title={document.displayFilename}>{document.displayFilename}</p>
+        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={`${documentTypeLabels[document.documentType]} · ${sourceTypeLabels[document.sourceType]}`}>
+          {documentTypeLabels[document.documentType]} · {sourceTypeLabels[document.sourceType]}
+        </p>
+      </div>
+      <div className="document-list-cell min-w-0 text-sm" role="cell">
+        <p className="font-medium text-foreground">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Version {document.versionNumber}</p>
+      </div>
+      <div className="document-list-cell min-w-0" role="cell">
+        <ScanStatusBadge status={document.scanStatus} />
+      </div>
+      <div className="document-list-cell min-w-0" role="cell">
+        <VisibilityBadge visibility={document.visibility} />
+      </div>
+      <div className="document-list-cell min-w-0" role="cell">
+        <DocumentActions document={document} />
+      </div>
+    </div>
+  );
+}
+
+function DocumentActions({ document }: { document: MatterDocument }) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-2">
+      <Button asChild disabled={!canPreviewDocument(document)} size="sm" variant="outline">
+        <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">Preview</a>
+      </Button>
+      <Button asChild disabled={document.status === "quarantined" || document.scanStatus === "flagged"} size="sm" variant="outline">
+        <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">
+          {document.externalUrl ? <ExternalLink aria-hidden="true" className="size-4" /> : null}
+          {document.externalUrl ? "Open" : "Download"}
+        </a>
+      </Button>
+    </div>
+  );
+}
+
 function DocumentCard({ document }: { document: MatterDocument }) {
   return (
     <Card className="min-w-0 border-border bg-card shadow-sm">
@@ -259,6 +264,7 @@ function DocumentCard({ document }: { document: MatterDocument }) {
           <div><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</dd></div>
           <div><dt className="text-muted-foreground">Source</dt><dd className="font-medium text-foreground">{sourceTypeLabels[document.sourceType]}</dd></div>
         </dl>
+        <DocumentActions document={document} />
       </CardContent>
     </Card>
   );
@@ -267,21 +273,28 @@ function DocumentCard({ document }: { document: MatterDocument }) {
 function PackageRow({ outboundPackage }: { outboundPackage: OutboundPackage }) {
   const primaryRecipient = outboundPackage.recipients[0];
   return (
-    <TableRow className="h-14">
-      <TableCell className="px-3 py-2">
-        <p className="font-medium text-foreground">{outboundPackage.title}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{outboundPackage.documents.length} attachment{outboundPackage.documents.length === 1 ? "" : "s"}</p>
-      </TableCell>
-      <TableCell className="px-3 py-2 text-muted-foreground">{packageTypeLabels[outboundPackage.packageType]}</TableCell>
-      <TableCell className="px-3 py-2">
-        <p className="font-medium text-foreground">{primaryRecipient?.recipientNameSnapshot ?? "No recipient"}</p>
-        {primaryRecipient ? <VerificationBadge status={primaryRecipient.verificationStatus} /> : null}
-      </TableCell>
-      <TableCell className="px-3 py-2"><PackageStatusBadge status={outboundPackage.status} /></TableCell>
-      <TableCell className="px-3 py-2 text-right font-medium">{outboundPackage.amountDemanded !== null ? <CurrencyDisplay value={outboundPackage.amountDemanded} /> : "Not set"}</TableCell>
-      <TableCell className="px-3 py-2">{outboundPackage.responseDeadline ? <DateDisplay value={outboundPackage.responseDeadline} /> : "Not set"}</TableCell>
-      <TableCell className="px-3 py-2 text-muted-foreground"><DateDisplay value={outboundPackage.updatedAt.slice(0, 10)} /></TableCell>
-    </TableRow>
+    <div className="document-list-row matter-package-list-grid" role="row">
+      <div className="document-list-cell min-w-0" role="cell">
+        <p className="truncate font-medium text-foreground" title={outboundPackage.title}>{outboundPackage.title}</p>
+        <p className="mt-1 truncate text-xs text-muted-foreground" title={packageTypeLabels[outboundPackage.packageType]}>
+          {outboundPackage.documents.length} attachment{outboundPackage.documents.length === 1 ? "" : "s"} · {packageTypeLabels[outboundPackage.packageType]}
+        </p>
+      </div>
+      <div className="document-list-cell min-w-0" role="cell">
+        <p className="truncate font-medium text-foreground" title={primaryRecipient?.recipientNameSnapshot ?? "No recipient"}>{primaryRecipient?.recipientNameSnapshot ?? "No recipient"}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {primaryRecipient ? <VerificationBadge status={primaryRecipient.verificationStatus} /> : null}
+          <PackageStatusBadge status={outboundPackage.status} />
+        </div>
+      </div>
+      <div className="document-list-cell min-w-0 text-sm" role="cell">
+        <p className="font-medium text-foreground">{outboundPackage.amountDemanded !== null ? <CurrencyDisplay value={outboundPackage.amountDemanded} /> : "Not set"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{outboundPackage.responseDeadline ? <DateDisplay value={outboundPackage.responseDeadline} /> : "No response deadline"}</p>
+      </div>
+      <div className="document-list-cell min-w-0 text-sm text-muted-foreground" role="cell">
+        <DateDisplay value={outboundPackage.updatedAt.slice(0, 10)} />
+      </div>
+    </div>
   );
 }
 

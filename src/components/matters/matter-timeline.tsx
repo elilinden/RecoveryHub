@@ -100,7 +100,7 @@ function TimelineRow({ item, matterId, currentProfileId, isAdmin }: TimelineRowP
           ) : null}
         </div>
       </div>
-      <p className={cn("mt-2 text-sm text-muted-foreground", item.isStruckThrough && "line-through")}>{item.description}</p>
+      <p className={cn("mt-2 break-words text-sm text-muted-foreground", item.isStruckThrough && "line-through")}>{item.description}</p>
       {item.actorName ? <p className="mt-2 text-xs text-muted-foreground">By {item.actorName}</p> : null}
       {error ? <p className="mt-2 text-sm text-[var(--urgent)]">{error}</p> : null}
 

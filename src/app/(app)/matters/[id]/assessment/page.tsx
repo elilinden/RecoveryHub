@@ -122,7 +122,7 @@ export default async function RecoveryAssessmentPage({ params }: AssessmentPageP
 
       <form action={submitSaveRecoveryAssessmentAction} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <input name="matterId" type="hidden" value={matter.id} />
-        <input name="assessmentId" type="hidden" value={bundle.draft?.id ?? ""} />
+        <input name="assessmentId" type="hidden" value={workingAssessment?.id ?? ""} />
         <div className="space-y-6">
           <Card className="border-border bg-card shadow-sm">
             <CardContent className="space-y-4 p-5">

@@ -20,6 +20,18 @@ import {
 type PackageRow = Record<string, unknown>;
 type DocumentRow = Record<string, unknown>;
 type TemplateRow = Record<string, unknown>;
+type RecipientRow = Record<string, unknown>;
+type PackageDocumentRow = Record<string, unknown>;
+type ValidationRow = Record<string, unknown>;
+type ReviewRow = Record<string, unknown>;
+type EvidenceDocumentLinkRow = Record<string, unknown>;
+
+type PackageRelations = {
+  recipientsByPackage: Map<string, OutboundPackage["recipients"]>;
+  documentsByPackage: Map<string, OutboundPackage["documents"]>;
+  validationsByPackage: Map<string, OutboundPackage["validations"]>;
+  reviewsByPackage: Map<string, OutboundPackage["reviews"]>;
+};
 
 export async function loadMatterDocumentsAndPackages(input: {
   matterId: string;
@@ -39,10 +51,14 @@ export async function loadMatterDocumentsAndPackages(input: {
     supabase.from("outbound_packages").select("*").eq("matter_id", input.matterId).order("updated_at", { ascending: false }),
     supabase.from("document_templates").select("*").eq("is_active", true).order("updated_at", { ascending: false }),
   ]);
+  const documentRows = (documents.data ?? []) as DocumentRow[];
+  const evidenceLinksByDocument = await loadEvidenceLinksForDocuments(documentRows.map((row) => stringValue(row.id)));
+  const packageRows = (packages.data ?? []) as PackageRow[];
+  const relations = await loadPackageRelations(packageRows.map((row) => stringValue(row.id)));
 
   return {
-    documents: ((documents.data ?? []) as DocumentRow[]).map(mapDocumentRow),
-    packages: ((packages.data ?? []) as PackageRow[]).map((row) => mapPackageRow(row, [])),
+    documents: documentRows.map((row) => mapDocumentRow(row, evidenceLinksByDocument.get(stringValue(row.id)) ?? [])),
+    packages: packageRows.map((row) => mapPackageRow(row, relations)),
     templates: ((templates.data ?? []) as TemplateRow[]).map(mapTemplateRow),
   };
 }
@@ -81,7 +97,9 @@ export async function loadPackagesWorkspace(input: {
 
   const from = (query.page - 1) * query.pageSize;
   const { data, count } = await packageQuery.range(from, from + query.pageSize - 1);
-  const packages = ((data ?? []) as PackageRow[]).map((row) => mapPackageRow(row, []));
+  const packageRows = (data ?? []) as PackageRow[];
+  const relations = await loadPackageRelations(packageRows.map((row) => stringValue(row.id)));
+  const packages = packageRows.map((row) => mapPackageRow(row, relations));
   return {
     packages,
     query,
@@ -152,7 +170,67 @@ export async function getDevelopmentDocumentById(id: string) {
   return developmentDocuments.find((document) => document.id === id) ?? null;
 }
 
-function mapDocumentRow(row: DocumentRow): MatterDocument {
+async function loadPackageRelations(packageIds: string[]): Promise<PackageRelations> {
+  if (packageIds.length === 0) {
+    return {
+      recipientsByPackage: new Map(),
+      documentsByPackage: new Map(),
+      validationsByPackage: new Map(),
+      reviewsByPackage: new Map(),
+    };
+  }
+  const supabase = await createClient();
+  const [{ data: recipients }, { data: packageDocuments }, { data: validations }, { data: reviews }] = await Promise.all([
+    supabase.from("outbound_package_recipients").select("*").in("package_id", packageIds),
+    supabase.from("outbound_package_documents").select("*").in("package_id", packageIds).order("sort_order"),
+    supabase.from("outbound_package_validations").select("*").in("package_id", packageIds),
+    supabase.from("outbound_package_reviews").select("*").in("package_id", packageIds).order("created_at", { ascending: false }),
+  ]);
+  const packageDocumentRows = (packageDocuments ?? []) as PackageDocumentRow[];
+  const documentIds = [...new Set(packageDocumentRows.map((row) => stringValue(row.document_id)).filter(Boolean))];
+  const { data: matterDocuments } = documentIds.length > 0
+    ? await supabase.from("matter_documents").select("id,title,status,scan_status,visibility").in("id", documentIds)
+    : { data: [] };
+  const matterDocumentById = new Map(((matterDocuments ?? []) as DocumentRow[]).map((row) => [stringValue(row.id), row]));
+
+  return {
+    recipientsByPackage: groupByMapped((recipients ?? []) as RecipientRow[], (row) => stringValue(row.package_id), mapPackageRecipient),
+    documentsByPackage: groupByMapped(packageDocumentRows, (row) => stringValue(row.package_id), (row) => mapPackageDocument(row, matterDocumentById)),
+    validationsByPackage: groupByMapped((validations ?? []) as ValidationRow[], (row) => stringValue(row.package_id), mapPackageValidation),
+    reviewsByPackage: groupByMapped((reviews ?? []) as ReviewRow[], (row) => stringValue(row.package_id), mapPackageReview),
+  };
+}
+
+async function loadEvidenceLinksForDocuments(documentIds: string[]) {
+  if (documentIds.length === 0) return new Map<string, MatterDocument["evidenceLinks"]>();
+  const supabase = await createClient();
+  const { data: links } = await supabase.from("evidence_document_links").select("*").in("document_id", documentIds);
+  const linkRows = (links ?? []) as EvidenceDocumentLinkRow[];
+  const evidenceIds = [...new Set(linkRows.map((row) => stringValue(row.evidence_item_id)).filter(Boolean))];
+  const { data: evidenceRows } = evidenceIds.length > 0
+    ? await supabase.from("evidence_items").select("id,evidence_type,status").in("id", evidenceIds)
+    : { data: [] };
+  const evidenceById = new Map(((evidenceRows ?? []) as Array<Record<string, unknown>>).map((row) => [stringValue(row.id), row]));
+  const byDocument = new Map<string, MatterDocument["evidenceLinks"]>();
+
+  for (const link of linkRows) {
+    const documentId = stringValue(link.document_id);
+    const evidenceItemId = stringValue(link.evidence_item_id);
+    const evidence = evidenceById.get(evidenceItemId);
+    if (!documentId || !evidenceItemId || !evidence) continue;
+    const current = byDocument.get(documentId) ?? [];
+    current.push({
+      evidenceItemId,
+      evidenceType: stringValue(evidence.evidence_type),
+      status: stringValue(evidence.status),
+    });
+    byDocument.set(documentId, current);
+  }
+
+  return byDocument;
+}
+
+function mapDocumentRow(row: DocumentRow, evidenceLinks: MatterDocument["evidenceLinks"] = []): MatterDocument {
   return {
     id: stringValue(row.id),
     matterId: stringValue(row.matter_id),
@@ -179,18 +257,19 @@ function mapDocumentRow(row: DocumentRow): MatterDocument {
     versionNumber: numberOrNull(row.version_number) ?? 1,
     supersedesDocumentId: nullableString(row.supersedes_document_id),
     uploadedByName: null,
-    evidenceLinks: [],
+    evidenceLinks,
     createdAt: stringValue(row.created_at),
     updatedAt: stringValue(row.updated_at),
     archivedAt: nullableString(row.archived_at),
   };
 }
 
-function mapPackageRow(row: PackageRow, validations: OutboundPackage["validations"]): OutboundPackage {
+function mapPackageRow(row: PackageRow, relations: PackageRelations): OutboundPackage {
+  const id = stringValue(row.id);
   return {
-    id: stringValue(row.id),
+    id,
     matterId: stringValue(row.matter_id),
-    matterName: "Matter",
+    matterName: nullableString(row.matter_name_snapshot) ?? "Matter",
     carrierName: nullableString(row.carrier_name_snapshot) ?? "Carrier",
     packageType: stringValue(row.package_type) as OutboundPackage["packageType"],
     status: stringValue(row.status) as OutboundPackage["status"],
@@ -215,10 +294,68 @@ function mapPackageRow(row: PackageRow, validations: OutboundPackage["validation
     canceledAt: nullableString(row.canceled_at),
     createdAt: stringValue(row.created_at),
     updatedAt: stringValue(row.updated_at),
-    recipients: [],
-    documents: [],
-    validations,
-    reviews: [],
+    recipients: relations.recipientsByPackage.get(id) ?? [],
+    documents: relations.documentsByPackage.get(id) ?? [],
+    validations: relations.validationsByPackage.get(id) ?? [],
+    reviews: relations.reviewsByPackage.get(id) ?? [],
+  };
+}
+
+function mapPackageRecipient(row: RecipientRow): OutboundPackage["recipients"][number] {
+  return {
+    id: stringValue(row.id),
+    recipientNameSnapshot: stringValue(row.recipient_name_snapshot),
+    organizationNameSnapshot: nullableString(row.organization_name_snapshot),
+    emailAddress: nullableString(row.email_address),
+    emailSource: stringValue(row.email_source) as OutboundPackage["recipients"][number]["emailSource"],
+    recipientRole: stringValue(row.recipient_role) as OutboundPackage["recipients"][number]["recipientRole"],
+    relationshipToMatter: nullableString(row.relationship_to_matter),
+    verificationStatus: stringValue(row.verification_status) as OutboundPackage["recipients"][number]["verificationStatus"],
+    verifiedByName: null,
+    verifiedAt: nullableString(row.verified_at),
+    verificationNote: nullableString(row.verification_note),
+    isPrimary: Boolean(row.is_primary),
+  };
+}
+
+function mapPackageDocument(row: PackageDocumentRow, matterDocumentById: Map<string, DocumentRow>): OutboundPackage["documents"][number] {
+  const matterDocument = matterDocumentById.get(stringValue(row.document_id));
+  return {
+    id: stringValue(row.id),
+    documentId: stringValue(row.document_id),
+    title: nullableString(matterDocument?.title) ?? stringValue(row.display_filename_snapshot),
+    documentVersionNumberSnapshot: numberOrNull(row.document_version_number_snapshot) ?? 1,
+    displayFilenameSnapshot: stringValue(row.display_filename_snapshot),
+    documentTypeSnapshot: stringValue(row.document_type_snapshot) as OutboundPackage["documents"][number]["documentTypeSnapshot"],
+    scanStatus: stringValue(matterDocument?.scan_status ?? "not_scanned") as OutboundPackage["documents"][number]["scanStatus"],
+    visibility: stringValue(matterDocument?.visibility ?? "package_eligible") as OutboundPackage["documents"][number]["visibility"],
+    status: stringValue(matterDocument?.status ?? "available") as OutboundPackage["documents"][number]["status"],
+    sortOrder: numberOrNull(row.sort_order) ?? 1,
+    isRequired: Boolean(row.is_required),
+  };
+}
+
+function mapPackageValidation(row: ValidationRow): OutboundPackage["validations"][number] {
+  return {
+    id: stringValue(row.id),
+    validationKey: stringValue(row.validation_key),
+    status: stringValue(row.status) as OutboundPackage["validations"][number]["status"],
+    severity: stringValue(row.severity) as OutboundPackage["validations"][number]["severity"],
+    title: stringValue(row.title),
+    description: stringValue(row.description),
+    overrideReason: nullableString(row.override_reason),
+    resolvedAt: nullableString(row.resolved_at),
+  };
+}
+
+function mapPackageReview(row: ReviewRow): OutboundPackage["reviews"][number] {
+  return {
+    id: stringValue(row.id),
+    reviewerName: null,
+    reviewType: stringValue(row.review_type) as OutboundPackage["reviews"][number]["reviewType"],
+    decision: stringValue(row.decision) as OutboundPackage["reviews"][number]["decision"],
+    comments: nullableString(row.comments),
+    createdAt: stringValue(row.created_at),
   };
 }
 
@@ -247,6 +384,16 @@ function nullableString(value: unknown) {
 function numberOrNull(value: unknown) {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function groupByMapped<T, U>(items: T[], key: (item: T) => string, map: (item: T) => U) {
+  const grouped = new Map<string, U[]>();
+  for (const item of items) {
+    const groupKey = key(item);
+    if (!groupKey) continue;
+    grouped.set(groupKey, [...(grouped.get(groupKey) ?? []), map(item)]);
+  }
+  return grouped;
 }
 
 function escapeLike(value: string) {

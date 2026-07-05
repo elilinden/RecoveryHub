@@ -113,13 +113,15 @@ type MattersQueryOverrides = Omit<Partial<MattersQueryState>, "filters"> & {
   filters?: Partial<MattersQueryState["filters"]>;
 };
 
+export function readRawParam(params: Record<string, string | string[] | undefined> | URLSearchParams | undefined, key: string) {
+  if (!params) return "";
+  if (params instanceof URLSearchParams) return params.get(key) ?? "";
+  const value = params[key];
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
 export function parseMattersQuery(params?: Record<string, string | string[] | undefined> | URLSearchParams): MattersQueryState {
-  const read = (key: string) => {
-    if (!params) return "";
-    if (params instanceof URLSearchParams) return params.get(key) ?? "";
-    const value = params[key];
-    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
-  };
+  const read = (key: string) => readRawParam(params, key);
 
   const sort = read("sort") as MattersSort;
   const query: MattersQueryState = {
@@ -190,16 +192,25 @@ export function getStaleDayThreshold(query: MattersQueryState) {
   return query.filters.staleDays ? Number.parseInt(query.filters.staleDays, 10) : null;
 }
 
-export function applySavedView(query: MattersQueryState, views: WorkspaceSavedView[]) {
+export function applySavedView(
+  query: MattersQueryState,
+  views: WorkspaceSavedView[],
+  rawParams?: Record<string, string | string[] | undefined> | URLSearchParams
+) {
   if (!query.view) return query;
   const view = views.find((item) => item.id === query.view);
   if (!view) return { ...query, view: "" };
+  // A sort explicitly present in the URL alongside ?view=... should win over the view's own
+  // stored sort, so a shared/bookmarked link like /matters?view=x&sort=amount_sought behaves
+  // as requested instead of silently reverting to whatever sort was saved with the view.
+  const hasExplicitSort = readRawParam(rawParams, "sort") !== "";
   return {
     ...view.filterConfiguration,
     view: query.view,
     page: query.page,
     pageSize: query.pageSize,
     q: query.q || view.filterConfiguration.q,
+    sort: hasExplicitSort ? query.sort : view.filterConfiguration.sort,
   };
 }
 
@@ -276,13 +287,21 @@ export function paginateMatterItems(items: MatterListItem[], query: MattersQuery
 
 export function sortMatterItems(items: MatterListItem[], sort: MattersSort) {
   const priorityWeight = { urgent: 0, high: 1, normal: 2, low: 3 };
+  // Every warning type that the "needs attention" filter above treats as qualifying must also
+  // get its own tier here — otherwise a matter can pass that filter (any warning, or urgent/high
+  // priority) yet fall into the same undifferentiated weight-4 bucket as several very different
+  // warning types, some of which (an unverified statute deadline, a stale matter) represent real
+  // risk and shouldn't rank behind a generic "any warning" catch-all.
   const needsAttentionWeight = (matter: MatterListItem) => {
     if (matter.warnings.includes("overdue_next_action")) return 0;
-    if (matter.warnings.includes("deadline_within_30")) return 1;
+    if (matter.warnings.includes("deadline_within_30") || matter.warnings.includes("unverified_statute_deadline")) return 1;
     if (matter.priority === "urgent") return 2;
-    if (matter.priority === "high") return 3;
-    if (matter.warnings.length > 0) return 4;
-    return 5;
+    if (matter.warnings.includes("missing_next_action") || matter.warnings.includes("stale_matter")) return 3;
+    if (matter.priority === "high") return 4;
+    if (matter.warnings.includes("missing_information") || matter.warnings.includes("missing_required_evidence")) return 5;
+    if (matter.warnings.includes("draft_intake")) return 6;
+    if (matter.warnings.length > 0) return 7;
+    return 8;
   };
 
   return [...items].sort((a, b) => {

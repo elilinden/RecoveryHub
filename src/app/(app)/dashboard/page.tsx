@@ -93,7 +93,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 Deadlines <TabCount value={dashboard.upcomingDeadlines.length} />
               </TabsTrigger>
               <TabsTrigger className="gap-1.5" value="followup">
-                Follow-Up <TabCount value={dashboard.needsFollowUp.length} />
+                Follow-Up <TabCount value={followUpMatters.length} />
               </TabsTrigger>
             </TabsList>
 
@@ -158,7 +158,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       title={`${matter.snapshot.matterName} · ${matter.primaryFlag?.title ?? "Follow-up needed"}`}
                     />
                   ))}
-                  <ViewAllLink count={dashboard.needsFollowUp.length} href={dashboardMatterLinks.followUp} label="follow-up matters" />
+                  <ViewAllLink count={followUpMatters.length} href={dashboardMatterLinks.followUp} label="follow-up matters" />
                 </>
               ) : (
                 <InlineEmpty description="No matters are waiting on a response or stuck without a next action." title="Nothing waiting on follow-up" />

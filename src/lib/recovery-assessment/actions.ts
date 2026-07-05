@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { submitWithActionFeedback } from "@/lib/action-feedback/server";
 import { getCurrentProfile, type Profile } from "@/lib/data/profiles";
 import { loadMatterDetail } from "@/lib/matters-workspace/data";
 import { calculateRecoveryAssessment } from "@/lib/recovery-assessment/calculation";
@@ -99,11 +100,28 @@ export async function saveRecoveryAssessmentAction(formData: FormData): Promise<
 
   const supabase = await createClient();
   const now = new Date().toISOString();
+  const { data: existingAssessment, error: existingAssessmentError } = assessmentId
+    ? await supabase
+        .from("recovery_assessments")
+        .select("id,status,finalized_by,finalized_at")
+        .eq("id", assessmentId)
+        .eq("matter_id", matterId)
+        .maybeSingle()
+    : { data: null, error: null };
+  if (existingAssessmentError) return { ok: false, message: "We could not load this recovery assessment." };
+  if (assessmentId && !existingAssessment) return { ok: false, message: "We could not find this recovery assessment." };
+  if (existingAssessment?.status === "finalized" && !canFinalizeAssessment(profile.role)) {
+    return { ok: false, message: "Only an attorney, partner, or administrator may edit a finalized recovery assessment." };
+  }
+
+  const savedStatus = finalizing || existingAssessment?.status === "finalized" ? "finalized" : "draft";
+  const finalizedBy = savedStatus === "finalized" ? (existingAssessment?.finalized_by ?? profile.id) : null;
+  const finalizedAt = savedStatus === "finalized" ? (existingAssessment?.finalized_at ?? now) : null;
   const assessmentValues = {
     matter_id: matterId,
     assessment_model_id: model.id,
     assessment_model_version: model.version,
-    status: finalizing ? "finalized" : "draft",
+    status: savedStatus,
     viability_score: calculation.viabilityScore,
     potential_recoverable_amount: financials.potentialRecoverableAmount,
     estimated_recovery_probability: financials.estimatedRecoveryProbability,
@@ -118,8 +136,8 @@ export async function saveRecoveryAssessmentAction(formData: FormData): Promise<
     assumptions: assumptions || null,
     amount_explanation: financials.amountExplanation || null,
     completed_by: profile.id,
-    finalized_by: finalizing ? profile.id : null,
-    finalized_at: finalizing ? now : null,
+    finalized_by: finalizedBy,
+    finalized_at: finalizedAt,
   };
 
   const query = assessmentId
@@ -140,6 +158,19 @@ export async function saveRecoveryAssessmentAction(formData: FormData): Promise<
     is_missing: response.isMissing,
     notes: response.notes || null,
   })));
+
+  if (canFinalizeAssessment(profile.role)) {
+    await supabase.from("recovery_assessment_overrides").delete().eq("assessment_id", savedAssessmentId);
+    if (attorneyConclusion && overrideReason) {
+      await supabase.from("recovery_assessment_overrides").insert({
+        assessment_id: savedAssessmentId,
+        calculated_recommendation: calculation.calculatedRecommendation,
+        override_recommendation: attorneyConclusion,
+        reason: overrideReason,
+        created_by: profile.id,
+      });
+    }
+  }
 
   if (finalizing) {
     await supabase
@@ -165,15 +196,6 @@ export async function saveRecoveryAssessmentAction(formData: FormData): Promise<
       description: "Recovery assessment finalized.",
       new_value: { viabilityScore: calculation.viabilityScore, expectedNetValue: calculation.expectedNetValue } as Json,
     });
-    if (attorneyConclusion && overrideReason) {
-      await supabase.from("recovery_assessment_overrides").insert({
-        assessment_id: savedAssessmentId,
-        calculated_recommendation: calculation.calculatedRecommendation,
-        override_recommendation: attorneyConclusion,
-        reason: overrideReason,
-        created_by: profile.id,
-      });
-    }
   }
 
   revalidatePath("/dashboard");
@@ -184,7 +206,7 @@ export async function saveRecoveryAssessmentAction(formData: FormData): Promise<
 }
 
 export async function submitSaveRecoveryAssessmentAction(formData: FormData) {
-  await saveRecoveryAssessmentAction(formData);
+  await submitWithActionFeedback(saveRecoveryAssessmentAction, formData);
 }
 
 function canEditAssessment(role: Profile["role"]) {

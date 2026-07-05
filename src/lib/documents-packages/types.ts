@@ -180,6 +180,7 @@ export type OutboundPackage = {
   subjectLine: string | null;
   coverDocumentId: string | null;
   templateVersionId: string | null;
+  templateVersionStatus?: TemplateVersionStatus | null;
   amountDemanded: number | null;
   responseDeadline: string | null;
   paymentInstructions: string | null;

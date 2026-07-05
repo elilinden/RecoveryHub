@@ -79,7 +79,7 @@ export function createDocumentId() {
 }
 
 export function canPreviewDocument(input: { mimeType: string | null; status: DocumentStatus; scanStatus: DocumentScanStatus }) {
-  if (input.status === "quarantined" || input.status === "failed" || input.status === "archived") return false;
+  if (input.status !== "available") return false;
   if (input.scanStatus === "flagged") return false;
   return input.mimeType === "application/pdf" || input.mimeType === "image/jpeg" || input.mimeType === "image/png";
 }

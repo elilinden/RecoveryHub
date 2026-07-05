@@ -103,6 +103,8 @@ type PartyRow = { id: string; matter_id: string; contact_id: string | null; orga
 type ContactRow = { id: string; first_name: string; last_name: string; email: string | null; phone: string | null };
 type OrganizationRow = { id: string; name: string; email: string | null; phone: string | null };
 type EvidenceRow = { id: string; matter_id: string; evidence_type: string; status: EvidenceStatus; date_requested: string | null; date_received: string | null; notes: string | null; updated_at: string };
+type EvidenceDocumentLinkRow = { evidence_item_id: string; document_id: string };
+type MatterDocumentLinkRow = { id: string; title: string | null; display_filename: string | null };
 type DeadlineRow = {
   id: string;
   matter_id: string;
@@ -148,6 +150,9 @@ type ActivityRow = {
   created_at: string;
 };
 type SavedViewRow = { id: string; profile_id: string; name: string; filter_configuration: Json; is_shared: boolean };
+type MatterRowsQuery = {
+  range: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; count: number | null; error: unknown }>;
+};
 
 type LookupData = {
   carriers: Map<string, CarrierRow>;
@@ -165,7 +170,7 @@ export async function loadMattersWorkspace(input: {
 }> {
   const savedViews = await listWorkspaceSavedViews(input.profile);
   const parsedQuery = parseMattersQuery(input.searchParams);
-  const query = applySavedView(parsedQuery, savedViews);
+  const query = applySavedView(parsedQuery, savedViews, input.searchParams);
 
   if (!isSupabaseConfigured()) {
     const items = filterMatterItems(developmentMatterItems, query, new Date("2026-07-03T12:00:00.000Z"));
@@ -178,63 +183,80 @@ export async function loadMattersWorkspace(input: {
 
   const [filterOptions, lookup] = await Promise.all([loadWorkspaceFilterOptions(), loadLookupData()]);
   const supabase = await createClient();
-  let matterQuery = supabase.from("matters").select("*", { count: "exact" });
+  const buildMatterQuery = () => {
+    let matterQuery = supabase.from("matters").select("*", { count: "exact" });
 
-  if (query.filters.archivedOnly) matterQuery = matterQuery.eq("is_archived", true);
-  else if (!query.filters.archived) matterQuery = matterQuery.eq("is_archived", false);
-  if (!query.filters.closed) matterQuery = matterQuery.neq("stage", "closed");
-  if (query.filters.carrier) matterQuery = matterQuery.eq("carrier_id", query.filters.carrier);
-  if (query.filters.adjuster) matterQuery = matterQuery.eq("assigned_adjuster_id", query.filters.adjuster);
-  if (query.filters.matterType) matterQuery = matterQuery.eq("matter_type", query.filters.matterType as MatterType);
-  if (query.filters.stage) matterQuery = matterQuery.eq("stage", query.filters.stage as MatterStage);
-  if (query.filters.priority) matterQuery = matterQuery.eq("priority", query.filters.priority as PriorityLevel);
-  if (query.filters.intakeStatus) matterQuery = matterQuery.eq("intake_status", query.filters.intakeStatus as IntakeStatus);
-  if (query.filters.jurisdiction) matterQuery = matterQuery.eq("jurisdiction", query.filters.jurisdiction);
-  if (query.filters.attorney) matterQuery = matterQuery.eq("assigned_attorney_id", query.filters.attorney);
-  if (query.filters.staff) matterQuery = matterQuery.eq("assigned_staff_id", query.filters.staff);
-  if (query.filters.minAmount) matterQuery = matterQuery.gte("amount_sought", query.filters.minAmount);
-  if (query.filters.maxAmount) matterQuery = matterQuery.lte("amount_sought", query.filters.maxAmount);
-  if (query.filters.amountRecovered) matterQuery = matterQuery.gt("amount_recovered", 0);
-  if (query.filters.noAmountSought) matterQuery = matterQuery.eq("amount_sought", "0");
-  if (query.filters.nextAction) matterQuery = matterQuery.eq("next_action", query.filters.nextAction);
-  if (query.filters.needsAttention) {
-    matterQuery = matterQuery.or(
-      [
-        `next_action_due_date.lt.${today()}`,
-        "next_action.is.null",
-        `statute_deadline.lte.${addDays(30)}`,
-        "statute_deadline_verified.eq.false",
-        `last_substantive_activity_at.lt.${addDays(-30)}`,
-        "priority.in.(urgent,high)",
-        "assigned_adjuster_id.is.null",
-        "insurance_status.eq.unknown",
-        "liability_assessment.eq.unknown",
-      ].join(",")
-    );
-  }
-  if (query.filters.overdueNextAction) matterQuery = matterQuery.lt("next_action_due_date", today());
-  if (query.filters.missingNextAction) matterQuery = matterQuery.is("next_action", null);
-  if (query.filters.draftIntake) matterQuery = matterQuery.neq("intake_status", "complete");
-  if (query.filters.readyForDemand) matterQuery = matterQuery.eq("stage", "ready_for_demand");
-  if (query.filters.overdueDeadline) matterQuery = matterQuery.lt("statute_deadline", today());
-  if (query.filters.missingStatuteDeadline) matterQuery = matterQuery.is("statute_deadline", null);
-  if (query.filters.unverifiedDeadline) matterQuery = matterQuery.eq("statute_deadline_verified", false);
-  if (query.filters.deadlineWindow) matterQuery = matterQuery.lte("statute_deadline", addDays(Number(query.filters.deadlineWindow)));
-  if (query.filters.missingInformation) {
-    matterQuery = matterQuery.or("assigned_adjuster_id.is.null,insurance_status.eq.unknown,liability_assessment.eq.unknown");
-  }
-  if (query.filters.unknownInsurance) matterQuery = matterQuery.eq("insurance_status", "unknown");
-  if (query.filters.unknownLiability) matterQuery = matterQuery.eq("liability_assessment", "unknown");
-  if (query.q) {
-    matterQuery = matterQuery.or(
-      `matter_name.ilike.%${escapeLike(query.q)}%,carrier_claim_number.ilike.%${escapeLike(query.q)}%,firm_matter_number.ilike.%${escapeLike(query.q)}%,next_action.ilike.%${escapeLike(query.q)}%`
-    );
-  }
+    if (query.filters.archivedOnly) matterQuery = matterQuery.eq("is_archived", true);
+    else if (!query.filters.archived) matterQuery = matterQuery.eq("is_archived", false);
+    if (!query.filters.closed) matterQuery = matterQuery.neq("stage", "closed");
+    if (query.filters.carrier) matterQuery = matterQuery.eq("carrier_id", query.filters.carrier);
+    if (query.filters.adjuster) matterQuery = matterQuery.eq("assigned_adjuster_id", query.filters.adjuster);
+    if (query.filters.matterType) matterQuery = matterQuery.eq("matter_type", query.filters.matterType as MatterType);
+    if (query.filters.stage) matterQuery = matterQuery.eq("stage", query.filters.stage as MatterStage);
+    if (query.filters.priority) matterQuery = matterQuery.eq("priority", query.filters.priority as PriorityLevel);
+    if (query.filters.intakeStatus) matterQuery = matterQuery.eq("intake_status", query.filters.intakeStatus as IntakeStatus);
+    if (query.filters.jurisdiction) matterQuery = matterQuery.eq("jurisdiction", query.filters.jurisdiction);
+    if (query.filters.attorney) matterQuery = matterQuery.eq("assigned_attorney_id", query.filters.attorney);
+    if (query.filters.staff) matterQuery = matterQuery.eq("assigned_staff_id", query.filters.staff);
+    if (query.filters.minAmount) matterQuery = matterQuery.gte("amount_sought", query.filters.minAmount);
+    if (query.filters.maxAmount) matterQuery = matterQuery.lte("amount_sought", query.filters.maxAmount);
+    if (query.filters.amountRecovered) matterQuery = matterQuery.gt("amount_recovered", 0);
+    if (query.filters.noAmountSought) matterQuery = matterQuery.eq("amount_sought", "0");
+    if (query.filters.nextAction) matterQuery = matterQuery.eq("next_action", query.filters.nextAction);
+    if (query.filters.needsAttention) {
+      matterQuery = matterQuery.or(
+        [
+          `next_action_due_date.lt.${today()}`,
+          "next_action.is.null",
+          `statute_deadline.lte.${addDays(30)}`,
+          "statute_deadline_verified.eq.false",
+          `last_substantive_activity_at.lt.${addDays(-30)}`,
+          "priority.in.(urgent,high)",
+          "assigned_adjuster_id.is.null",
+          "insurance_status.eq.unknown",
+          "liability_assessment.eq.unknown",
+        ].join(",")
+      );
+    }
+    if (query.filters.overdueNextAction) matterQuery = matterQuery.lt("next_action_due_date", today());
+    if (query.filters.missingNextAction) matterQuery = matterQuery.is("next_action", null);
+    if (query.filters.draftIntake) matterQuery = matterQuery.neq("intake_status", "complete");
+    if (query.filters.readyForDemand) matterQuery = matterQuery.eq("stage", "ready_for_demand");
+    if (query.filters.overdueDeadline) matterQuery = matterQuery.lt("statute_deadline", today());
+    if (query.filters.missingStatuteDeadline) matterQuery = matterQuery.is("statute_deadline", null);
+    if (query.filters.unverifiedDeadline) matterQuery = matterQuery.eq("statute_deadline_verified", false);
+    if (query.filters.deadlineWindow) matterQuery = matterQuery.lte("statute_deadline", addDays(Number(query.filters.deadlineWindow)));
+    if (query.filters.missingInformation) {
+      matterQuery = matterQuery.or("assigned_adjuster_id.is.null,insurance_status.eq.unknown,liability_assessment.eq.unknown");
+    }
+    if (query.filters.unknownInsurance) matterQuery = matterQuery.eq("insurance_status", "unknown");
+    if (query.filters.unknownLiability) matterQuery = matterQuery.eq("liability_assessment", "unknown");
+    return matterQuery;
+  };
 
-  matterQuery = applySupabaseSort(matterQuery, query.sort);
+  const requiresAppPagination = Boolean(query.q) || ["needs_attention", "activity_age", "carrier", "priority"].includes(query.sort);
   const from = (query.page - 1) * query.pageSize;
   const to = from + query.pageSize - 1;
-  const { data, count, error } = await matterQuery.range(from, to);
+  let data: unknown[] | null;
+  let count: number | null;
+  let error: unknown;
+
+  if (requiresAppPagination) {
+    const fetched = await fetchAllMatterRows(() => applySupabaseSort(buildMatterQuery(), "updated_desc"));
+    data = fetched.data;
+    count = fetched.count;
+    error = fetched.error;
+  } else {
+    // No search term here — Boolean(query.q) is one of the requiresAppPagination triggers above,
+    // so a search term always takes the app-pagination branch and is matched against every
+    // display column via filterMatterItemsBySearch, not just the few columns a DB-level ilike
+    // could reasonably cover.
+    const matterQuery = buildMatterQuery();
+    const response = await applySupabaseSort(matterQuery, query.sort).range(from, to);
+    data = response.data;
+    count = response.count;
+    error = response.error;
+  }
 
   if (error) {
     return { result: { items: [], totalCount: 0, rangeStart: 0, rangeEnd: 0, query }, filterOptions, savedViews };
@@ -242,15 +264,24 @@ export async function loadMattersWorkspace(input: {
 
   const rows = (data ?? []) as unknown as MatterRow[];
   const related = await loadRelatedForMatters(rows.map((row) => row.id));
-  const items = rows.map((row) => mapMatterListItem(row, lookup, related.partiesByMatter.get(row.id) ?? [], related.evidenceByMatter.get(row.id) ?? []));
-  const sortedItems = query.sort === "needs_attention" || query.sort === "activity_age" ? sortMatterItems(items, query.sort) : items;
+  const items = rows.map((row) =>
+    mapMatterListItem(row, lookup, related.partiesByMatter.get(row.id) ?? [], related.evidenceByMatter.get(row.id) ?? [], related.contactsById, related.organizationsById)
+  );
+  if (requiresAppPagination) {
+    const searchedItems = query.q ? filterMatterItemsBySearch(items, query.q) : items;
+    return {
+      result: paginateMatterItems(sortMatterItems(searchedItems, query.sort), query),
+      filterOptions,
+      savedViews,
+    };
+  }
 
   return {
     result: {
-      items: sortedItems,
-      totalCount: count ?? sortedItems.length,
-      rangeStart: sortedItems.length === 0 ? 0 : from + 1,
-      rangeEnd: from + sortedItems.length,
+      items,
+      totalCount: count ?? items.length,
+      rangeStart: items.length === 0 ? 0 : from + 1,
+      rangeEnd: from + items.length,
       query,
     },
     filterOptions,
@@ -272,7 +303,7 @@ export async function loadMatterDetail(id: string, profile: Profile): Promise<Ma
   const row = data as unknown as MatterRow;
   const lookup = await loadLookupData();
   const related = await loadDetailRelated(id);
-  const listItem = mapMatterListItem(row, lookup, related.parties, related.evidence);
+  const listItem = mapMatterListItem(row, lookup, related.parties, related.evidence, related.contacts, related.organizations);
   const permissions = getMatterPermissions(profile.role);
 
   return {
@@ -312,7 +343,7 @@ export async function loadMatterDetail(id: string, profile: Profile): Promise<Ma
       role: assignment.assignment_role.replaceAll("_", " "),
     })),
     parties: related.parties.map((party) => mapParty(party, related.contacts, related.organizations)),
-    evidence: related.evidence.map(mapEvidence),
+    evidence: related.evidence.map((item) => mapEvidence(item, related.evidenceDocumentLinksByEvidence.get(item.id) ?? [])),
     deadlines: related.deadlines.map((deadline) => mapDeadline(deadline, lookup.profiles)),
     tasks: related.tasks.map((task) => mapTask(task, lookup.profiles)),
     timeline: [
@@ -386,7 +417,14 @@ export async function loadWorkspaceFilterOptions(): Promise<WorkspaceFilterOptio
   };
 }
 
-function mapMatterListItem(row: MatterRow, lookup: LookupData, parties: PartyRow[], evidence: EvidenceRow[]): MatterListItem {
+function mapMatterListItem(
+  row: MatterRow,
+  lookup: LookupData,
+  parties: PartyRow[],
+  evidence: EvidenceRow[],
+  contactsById: Map<string, ContactRow> = new Map(),
+  organizationsById: Map<string, OrganizationRow> = new Map()
+): MatterListItem {
   const daysSinceActivity = daysBetweenDates(row.last_substantive_activity_at ?? row.updated_at);
   const warnings = buildWarnings(row, parties, evidence, daysSinceActivity);
   const carrier = row.carrier_id ? lookup.carriers.get(row.carrier_id) : null;
@@ -405,7 +443,9 @@ function mapMatterListItem(row: MatterRow, lookup: LookupData, parties: PartyRow
     currentIntakeStep: row.current_intake_step,
     lastAutosavedAt: row.last_autosaved_at,
     assignedAdjusterName: adjuster?.full_name ?? null,
+    assignedAttorneyId: row.assigned_attorney_id,
     assignedAttorneyName: attorney?.full_name ?? null,
+    assignedStaffId: row.assigned_staff_id,
     assignedStaffName: staff?.full_name ?? null,
     assignedFirmUser: attorney?.full_name ?? staff?.full_name ?? "Unassigned",
     amountSought: numberFrom(row.amount_sought),
@@ -426,7 +466,14 @@ function mapMatterListItem(row: MatterRow, lookup: LookupData, parties: PartyRow
     isArchived: row.is_archived,
     warnings,
     followUpReasons: warningsToFollowUps(warnings),
-    primaryPartyNames: parties.filter((party) => party.party_role === "responsible_party" || party.is_primary).map((party) => party.contact_id ?? party.organization_id ?? "Associated party"),
+    primaryPartyNames: parties
+      .filter((party) => party.party_role === "responsible_party" || party.is_primary)
+      .map((party) => {
+        const contact = party.contact_id ? contactsById.get(party.contact_id) : null;
+        if (contact) return `${contact.first_name} ${contact.last_name}`.trim();
+        const organization = party.organization_id ? organizationsById.get(party.organization_id) : null;
+        return organization?.name ?? "Associated party";
+      }),
   };
 }
 
@@ -495,15 +542,35 @@ async function loadLookupData(): Promise<LookupData> {
 }
 
 async function loadRelatedForMatters(matterIds: string[]) {
-  if (matterIds.length === 0) return { partiesByMatter: new Map<string, PartyRow[]>(), evidenceByMatter: new Map<string, EvidenceRow[]>() };
+  if (matterIds.length === 0) {
+    return {
+      partiesByMatter: new Map<string, PartyRow[]>(),
+      evidenceByMatter: new Map<string, EvidenceRow[]>(),
+      contactsById: new Map<string, ContactRow>(),
+      organizationsById: new Map<string, OrganizationRow>(),
+    };
+  }
   const supabase = await createClient();
   const [{ data: parties }, { data: evidence }] = await Promise.all([
     supabase.from("matter_parties").select("*").in("matter_id", matterIds),
     supabase.from("evidence_items").select("*").in("matter_id", matterIds),
   ]);
+  const partyRows = (parties ?? []) as unknown as PartyRow[];
+  const contactIds = [...new Set(partyRows.map((party) => party.contact_id).filter((id): id is string => Boolean(id)))];
+  const organizationIds = [...new Set(partyRows.map((party) => party.organization_id).filter((id): id is string => Boolean(id)))];
+  const [{ data: contacts }, { data: organizations }] = await Promise.all([
+    contactIds.length > 0
+      ? supabase.from("contacts").select("id,first_name,last_name,email,phone").in("id", contactIds)
+      : Promise.resolve({ data: [] as ContactRow[] }),
+    organizationIds.length > 0
+      ? supabase.from("organizations").select("id,name,email,phone").in("id", organizationIds)
+      : Promise.resolve({ data: [] as OrganizationRow[] }),
+  ]);
   return {
-    partiesByMatter: groupBy((parties ?? []) as unknown as PartyRow[], (row) => row.matter_id),
+    partiesByMatter: groupBy(partyRows, (row) => row.matter_id),
     evidenceByMatter: groupBy((evidence ?? []) as unknown as EvidenceRow[], (row) => row.matter_id),
+    contactsById: new Map(((contacts ?? []) as unknown as ContactRow[]).map((row) => [row.id, row])),
+    organizationsById: new Map(((organizations ?? []) as unknown as OrganizationRow[]).map((row) => [row.id, row])),
   };
 }
 
@@ -531,10 +598,35 @@ async function loadDetailRelated(matterId: string) {
     supabase.from("organizations").select("id,name,email,phone"),
   ]);
 
+  const evidenceRows = (evidence ?? []) as unknown as EvidenceRow[];
+  const evidenceIds = evidenceRows.map((row) => row.id);
+  const { data: evidenceDocumentLinks } = evidenceIds.length > 0
+    ? await supabase.from("evidence_document_links").select("evidence_item_id,document_id").in("evidence_item_id", evidenceIds)
+    : { data: [] };
+  const linkRows = (evidenceDocumentLinks ?? []) as unknown as EvidenceDocumentLinkRow[];
+  const documentIds = [...new Set(linkRows.map((row) => row.document_id).filter(Boolean))];
+  const { data: linkedDocuments } = documentIds.length > 0
+    ? await supabase.from("matter_documents").select("id,title,display_filename").in("id", documentIds)
+    : { data: [] };
+  const documentsById = new Map(((linkedDocuments ?? []) as unknown as MatterDocumentLinkRow[]).map((row) => [row.id, row]));
+  const evidenceDocumentLinksByEvidence = new Map<string, EvidenceItem["documentLinks"]>();
+  for (const row of linkRows) {
+    const document = documentsById.get(row.document_id);
+    evidenceDocumentLinksByEvidence.set(row.evidence_item_id, [
+      ...(evidenceDocumentLinksByEvidence.get(row.evidence_item_id) ?? []),
+      {
+        documentId: row.document_id,
+        title: document?.title ?? "Linked document",
+        displayFilename: document?.display_filename ?? "Document",
+      },
+    ]);
+  }
+
   return {
     assignments: (assignments ?? []) as unknown as AssignmentRow[],
     parties: (parties ?? []) as unknown as PartyRow[],
-    evidence: (evidence ?? []) as unknown as EvidenceRow[],
+    evidence: evidenceRows,
+    evidenceDocumentLinksByEvidence,
     deadlines: (deadlines ?? []) as unknown as DeadlineRow[],
     tasks: (tasks ?? []) as unknown as TaskRow[],
     events: (events ?? []) as unknown as EventRow[],
@@ -558,7 +650,7 @@ function mapParty(party: PartyRow, contacts: Map<string, ContactRow>, organizati
   };
 }
 
-function mapEvidence(row: EvidenceRow): EvidenceItem {
+function mapEvidence(row: EvidenceRow, documentLinks: EvidenceItem["documentLinks"] = []): EvidenceItem {
   return {
     id: row.id,
     evidenceType: row.evidence_type,
@@ -566,6 +658,7 @@ function mapEvidence(row: EvidenceRow): EvidenceItem {
     dateRequested: row.date_requested,
     dateReceived: row.date_received,
     notes: row.notes,
+    documentLinks,
     updatedAt: row.updated_at,
   };
 }
@@ -651,8 +744,48 @@ function applySupabaseSort<T extends SortableQuery<T>>(query: T, sort: string): 
   if (sort === "amount_sought") return query.order("amount_sought", { ascending: false }).order("id", { ascending: true });
   if (sort === "amount_recovered") return query.order("amount_recovered", { ascending: false }).order("id", { ascending: true });
   if (sort === "matter_name") return query.order("matter_name", { ascending: true }).order("id", { ascending: true });
-  if (sort === "priority") return query.order("priority", { ascending: true }).order("updated_at", { ascending: false });
+  // "priority" is intentionally absent here: the column stores strings ("urgent"/"high"/"normal"/
+  // "low") whose alphabetical order doesn't match real urgency. requiresAppPagination routes
+  // "priority" through fetchAllMatterRows + sortMatterItems (which weighs urgency correctly)
+  // instead of reaching this function with that sort value.
   return query.order("updated_at", { ascending: false }).order("id", { ascending: true });
+}
+
+async function fetchAllMatterRows(createQuery: () => MatterRowsQuery) {
+  const pageSize = 1000;
+  const rows: unknown[] = [];
+  let count: number | null = null;
+  let from = 0;
+
+  while (count === null || rows.length < count) {
+    const { data, count: nextCount, error } = await createQuery().range(from, from + pageSize - 1);
+    if (error) return { data: rows, count: count ?? nextCount, error };
+    const page = data ?? [];
+    rows.push(...page);
+    count = nextCount ?? rows.length;
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return { data: rows, count: count ?? rows.length, error: null };
+}
+
+function filterMatterItemsBySearch(items: MatterListItem[], search: string) {
+  const q = search.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((matter) =>
+    [
+      matter.matterName,
+      matter.carrierName,
+      matter.carrierClaimNumber,
+      matter.firmMatterNumber,
+      matter.assignedAdjusterName,
+      matter.assignedAttorneyName,
+      matter.assignedStaffName,
+      matter.primaryPartyNames.join(" "),
+      matter.nextAction,
+    ].some((value) => value?.toLowerCase().includes(q))
+  );
 }
 
 function readMatterSpecificString(value: Json, key: string) {
@@ -690,8 +823,4 @@ function addDays(days: number) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
-}
-
-function escapeLike(value: string) {
-  return value.replaceAll("%", "\\%").replaceAll("_", "\\_");
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { SelectField, TextField } from "@/components/matters/matter-form-fields";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { addMatterEventAction } from "@/lib/matters-workspace/actions";
 import type { WorkspaceActionResult } from "@/lib/matters-workspace/actions";
 
 const initialState: WorkspaceActionResult = { ok: true, message: "" };
+const descriptionMaxLength = 700;
 
 type AddMatterEventFormProps = {
   matterId: string;
@@ -16,12 +17,14 @@ type AddMatterEventFormProps = {
 
 export function AddMatterEventForm({ matterId }: AddMatterEventFormProps) {
   const [state, action, pending] = useActionState(addMatterEventAction, initialState);
+  const [descriptionLength, setDescriptionLength] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const previousPending = useRef(pending);
 
   useEffect(() => {
     if (previousPending.current && !pending && state.ok) {
       formRef.current?.reset();
+      setDescriptionLength(0);
     }
     previousPending.current = pending;
   }, [pending, state]);
@@ -47,12 +50,21 @@ export function AddMatterEventForm({ matterId }: AddMatterEventFormProps) {
         <span>Time</span>
         <Input name="occurredTime" type="time" />
       </label>
-      <TextField label="Description" name="description" value="" />
+      <TextField
+        label="Description"
+        maxLength={descriptionMaxLength}
+        name="description"
+        onChange={(event) => setDescriptionLength(event.target.value.length)}
+        value=""
+      />
       <Button className="self-end" disabled={pending} type="submit">
         {pending ? "Adding..." : "Add Event"}
       </Button>
       <p className="text-xs text-muted-foreground lg:col-span-4">
         Defaults to right now. Mention a different date or time in the description if this happened earlier.
+      </p>
+      <p className="text-xs text-muted-foreground lg:col-span-4">
+        {descriptionLength}/{descriptionMaxLength} characters
       </p>
       {!state.ok ? <p className="text-sm text-[var(--urgent)] lg:col-span-4">{state.message}</p> : null}
     </form>

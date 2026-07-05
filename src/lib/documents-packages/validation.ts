@@ -11,6 +11,7 @@ export type PackageValidationInput = {
     | "paymentInstructions"
     | "coverDocumentId"
     | "templateVersionId"
+    | "templateVersionStatus"
     | "documents"
     | "recipients"
   >;
@@ -24,7 +25,8 @@ export function validateOutboundPackage(input: PackageValidationInput): PackageV
   const validations: ValidationDraft[] = [];
   const pkg = input.outboundPackage;
   const matter = input.matter;
-  const primaryRecipient = pkg.recipients.find((recipient) => recipient.isPrimary) ?? pkg.recipients[0];
+  const primaryRecipients = pkg.recipients.filter((recipient) => recipient.isPrimary);
+  const primaryRecipient = primaryRecipients[0] ?? pkg.recipients[0];
 
   validations.push(makeValidation("matter_match", pkg.matterId === matter.id, "critical", "Correct matter", "Package belongs to the selected matter."));
   validations.push(makeValidation("claim_number_present", Boolean(matter.carrierClaimNumber), "high", "Claim number present", "Carrier claim number is required before approval."));
@@ -32,6 +34,7 @@ export function validateOutboundPackage(input: PackageValidationInput): PackageV
   validations.push(makeValidation("insured_present", matter.primaryPartyNames.length > 0, "medium", "Insured or primary party present", "A primary party should be recorded for the package snapshot."));
 
   validations.push(makeValidation("recipient_present", Boolean(primaryRecipient), "critical", "Recipient selected", "A package must include an intended primary recipient."));
+  validations.push(makeValidation("recipient_primary_unique", primaryRecipients.length <= 1, "critical", "One primary recipient", "Only one primary package recipient may be used for approval."));
   validations.push(makeValidation("recipient_relationship", Boolean(primaryRecipient?.relationshipToMatter), "high", "Recipient relationship documented", "Recipient relationship to the matter must be recorded."));
   validations.push(makeValidation("recipient_email_present", Boolean(primaryRecipient?.emailAddress), "critical", "Recipient email present", "Recipient email must be recorded before review."));
   validations.push(makeValidation("recipient_email_format", isEmail(primaryRecipient?.emailAddress ?? ""), "critical", "Recipient email format", "Recipient email must use a valid email format."));
@@ -47,7 +50,7 @@ export function validateOutboundPackage(input: PackageValidationInput): PackageV
   validations.push(makeValidation("statute_deadline_verified", !matter.statuteDeadline || matter.statuteDeadlineVerified, "medium", "Legal deadline verified", "Unverified legal deadlines must be reviewed before sending."));
 
   validations.push(makeValidation("cover_document_exists", Boolean(pkg.coverDocumentId), "critical", "Cover document exists", "Generate or attach the package cover document."));
-  validations.push(makeValidation("approved_template_recorded", Boolean(pkg.templateVersionId), "critical", "Approved template recorded", "The package must preserve the approved template version used."));
+  validations.push(makeValidation("approved_template_recorded", Boolean(pkg.templateVersionId) && pkg.templateVersionStatus === "approved", "critical", "Approved template recorded", "The package must preserve an approved template version."));
 
   const selectedDocumentIds = new Set<string>();
   const duplicates = pkg.documents.some((document) => {
@@ -78,27 +81,30 @@ export function hasBlockingValidation(validations: PackageValidation[]) {
 }
 
 export function getPackageApprovalBlockers(
-  outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations">
+  outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "templateVersionId" | "templateVersionStatus" | "validations">
 ) {
   const blockers: string[] = [];
-  const primaryRecipient = outboundPackage.recipients.find((recipient) => recipient.isPrimary) ?? outboundPackage.recipients[0];
+  const primaryRecipients = outboundPackage.recipients.filter((recipient) => recipient.isPrimary);
+  const primaryRecipient = primaryRecipients[0] ?? outboundPackage.recipients[0];
   const hasRequiredAttachment = outboundPackage.documents.some((document) => document.isRequired);
   const hasBlockedAttachment = outboundPackage.documents.some((document) => document.status !== "available" || document.scanStatus === "flagged" || document.scanStatus === "scan_failed");
   const criticalValidationFailure = outboundPackage.validations.some((validation) => validation.status === "failed" && validation.severity === "critical");
   const latestAttorneyReview = latestReview(outboundPackage.reviews, "attorney_review");
 
   if (!primaryRecipient) blockers.push("Add a package recipient.");
+  if (primaryRecipients.length > 1) blockers.push("Keep one primary package recipient.");
   if (primaryRecipient && primaryRecipient.verificationStatus !== "verified") blockers.push("Verify the recipient email.");
   if (!hasRequiredAttachment || hasBlockedAttachment) blockers.push("Add all required available attachments.");
   if (!outboundPackage.coverDocumentId) blockers.push("Generate or attach the required cover document.");
+  if (!outboundPackage.templateVersionId || outboundPackage.templateVersionStatus !== "approved") blockers.push("Use an approved template version.");
   if (criticalValidationFailure) blockers.push("Resolve critical validation failures.");
   if (outboundPackage.status !== "ready_for_review") blockers.push("Submit the package for attorney review.");
-  if (latestAttorneyReview?.decision === "changes_requested" || latestAttorneyReview?.decision === "rejected") blockers.push("Complete the required attorney review.");
+  if (!latestAttorneyReview || latestAttorneyReview.decision !== "approved") blockers.push("Complete the required attorney review.");
 
   return blockers;
 }
 
-export function canApprovePackageForSend(outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations">) {
+export function canApprovePackageForSend(outboundPackage: Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "templateVersionId" | "templateVersionStatus" | "validations">) {
   return getPackageApprovalBlockers(outboundPackage).length === 0;
 }
 

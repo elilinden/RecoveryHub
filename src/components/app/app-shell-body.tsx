@@ -12,11 +12,12 @@ import type { Profile } from "@/lib/data/profiles";
 type AppShellBodyProps = {
   children: ReactNode;
   profile: Profile;
+  actionFeedback?: ReactNode;
   configurationNotice?: ReactNode;
   defaultCollapsed: boolean;
 };
 
-export function AppShellBody({ children, profile, configurationNotice, defaultCollapsed }: AppShellBodyProps) {
+export function AppShellBody({ children, profile, actionFeedback, configurationNotice, defaultCollapsed }: AppShellBodyProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
   function toggleCollapsed() {
@@ -34,6 +35,7 @@ export function AppShellBody({ children, profile, configurationNotice, defaultCo
         <MobileNavigation profile={profile} />
         <main className="mx-auto min-w-0 w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8" id="main-content">
           {configurationNotice}
+          {actionFeedback}
           <div className="min-w-0">{children}</div>
         </main>
       </div>

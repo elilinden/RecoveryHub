@@ -7,7 +7,9 @@ import {
   filterMatterItems,
   paginateMatterItems,
   parseMattersQuery,
+  sortMatterItems,
 } from "./query";
+import type { MatterWarning } from "./types";
 
 describe("matters workspace query", () => {
   it("parses search, filters, sorting, and pagination from URL state", () => {
@@ -55,6 +57,20 @@ describe("matters workspace query", () => {
     expect(applied.page).toBe(2);
   });
 
+  it("lets an explicit URL sort win over a saved view's own stored sort", () => {
+    const query = parseMattersQuery(new URLSearchParams("view=system-draft-intakes&sort=amount_sought"));
+    const applied = applySavedView(query, systemSavedViews, new URLSearchParams("view=system-draft-intakes&sort=amount_sought"));
+
+    expect(applied.sort).toBe("amount_sought");
+  });
+
+  it("falls back to the saved view's stored sort when no sort is given in the URL", () => {
+    const query = parseMattersQuery(new URLSearchParams("view=system-draft-intakes"));
+    const applied = applySavedView(query, systemSavedViews, new URLSearchParams("view=system-draft-intakes"));
+
+    expect(applied.sort).toBe(systemSavedViews.find((view) => view.id === "system-draft-intakes")?.filterConfiguration.sort);
+  });
+
   it("ignores unknown saved view ids so stale links do not behave like active filters", () => {
     const query = parseMattersQuery(new URLSearchParams("view=my-tasks&page=2"));
     const applied = applySavedView(query, systemSavedViews);
@@ -78,6 +94,27 @@ describe("matters workspace query", () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((matter) => matter.warnings.includes("missing_information") || matter.warnings.includes("missing_required_evidence"))).toBe(true);
+  });
+
+  it("sorts priority by urgency instead of alphabetically", () => {
+    const sorted = sortMatterItems([
+      { ...developmentMatterItems[0], id: "normal", priority: "normal" },
+      { ...developmentMatterItems[0], id: "low", priority: "low" },
+      { ...developmentMatterItems[0], id: "urgent", priority: "urgent" },
+      { ...developmentMatterItems[0], id: "high", priority: "high" },
+    ], "priority");
+
+    expect(sorted.map((matter) => matter.priority)).toEqual(["urgent", "high", "normal", "low"]);
+  });
+
+  it("gives distinct needs-attention warning types their own rank instead of one shared tier", () => {
+    const base = developmentMatterItems[0];
+    const staleOnly = { ...base, id: "test-stale-only", priority: "normal" as const, warnings: ["stale_matter"] as MatterWarning[] };
+    const draftOnly = { ...base, id: "test-draft-only", priority: "normal" as const, warnings: ["draft_intake"] as MatterWarning[] };
+    const sorted = sortMatterItems([draftOnly, staleOnly], "needs_attention");
+
+    expect(sorted[0].id).toBe("test-stale-only");
+    expect(sorted[1].id).toBe("test-draft-only");
   });
 
   it("can show archived matters only", () => {

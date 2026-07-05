@@ -26,6 +26,7 @@ function packageFixture(overrides: Partial<OutboundPackage> = {}): OutboundPacka
     subjectLine: "Demand",
     coverDocumentId: "doc-cover",
     templateVersionId: "template-v1",
+    templateVersionStatus: "approved",
     amountDemanded: 12000,
     responseDeadline: "2026-08-01",
     paymentInstructions: "Send payment to the firm trust account instructions on file.",
@@ -113,6 +114,8 @@ describe("package validation", () => {
   it("blocks approved-for-send eligibility when required package integrity is missing", () => {
     const pkg = packageFixture({
       coverDocumentId: null,
+      templateVersionId: null,
+      templateVersionStatus: null,
       recipients: [],
       documents: [],
       validations: [
@@ -134,12 +137,76 @@ describe("package validation", () => {
       "Add a package recipient.",
       "Add all required available attachments.",
       "Generate or attach the required cover document.",
+      "Use an approved template version.",
       "Resolve critical validation failures.",
+      "Complete the required attorney review.",
     ]));
   });
 
+  it("blocks package approval when the stored template version is not approved", () => {
+    const draftTemplatePackage = packageFixture({ templateVersionStatus: "draft" });
+    const validations = validateOutboundPackage({ matter, outboundPackage: draftTemplatePackage, now: new Date("2026-07-03T12:00:00.000Z") });
+
+    expect(validations.find((validation) => validation.validationKey === "approved_template_recorded")?.status).toBe("failed");
+    expect(getPackageApprovalBlockers({
+      ...draftTemplatePackage,
+      reviews: [
+        {
+          id: "review-1",
+          reviewerName: "Eli Linden",
+          reviewType: "attorney_review",
+          decision: "approved",
+          comments: null,
+          createdAt: "2026-07-03T12:00:00.000Z",
+        },
+      ],
+    })).toContain("Use an approved template version.");
+  });
+
   it("allows approval eligibility for a ready package with verified recipient and required documents", () => {
-    expect(canApprovePackageForSend(packageFixture())).toBe(true);
+    expect(canApprovePackageForSend(packageFixture({
+      reviews: [
+        {
+          id: "review-1",
+          reviewerName: "Eli Linden",
+          reviewType: "attorney_review",
+          decision: "approved",
+          comments: null,
+          createdAt: "2026-07-03T12:00:00.000Z",
+        },
+      ],
+    }))).toBe(true);
+  });
+
+  it("blocks approval when duplicate primary recipients exist", () => {
+    const primary = packageFixture().recipients[0];
+    const pkg = packageFixture({
+      recipients: [
+        primary,
+        {
+          ...primary,
+          id: "recipient-2",
+          emailAddress: "updated@example.com",
+          verificationStatus: "unverified",
+          verifiedByName: null,
+          verifiedAt: null,
+        },
+      ],
+      reviews: [
+        {
+          id: "review-1",
+          reviewerName: "Eli Linden",
+          reviewType: "attorney_review",
+          decision: "approved",
+          comments: null,
+          createdAt: "2026-07-03T12:00:00.000Z",
+        },
+      ],
+    });
+    const validations = validateOutboundPackage({ matter, outboundPackage: pkg, now: new Date("2026-07-03T12:00:00.000Z") });
+    expect(validations.find((validation) => validation.validationKey === "recipient_primary_unique")?.status).toBe("failed");
+    expect(canApprovePackageForSend(pkg)).toBe(false);
+    expect(getPackageApprovalBlockers(pkg)).toContain("Keep one primary package recipient.");
   });
 
   it("resets verification when an email changes", () => {

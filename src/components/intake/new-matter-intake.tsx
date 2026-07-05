@@ -54,6 +54,7 @@ import { cn } from "@/lib/utils";
 type NewMatterIntakeProps = {
   options: IntakeOptions;
   initialData?: IntakeFormData | null;
+  initialLastSavedAt?: string | null;
   matterId?: string;
 };
 
@@ -65,7 +66,16 @@ const steps = [
   { id: 3, title: "Review and Route", subtitle: "Confirm deadlines, identify the next action, and review the matter." },
 ] as const;
 
-const localStorageKey = "recovery-hub:new-matter-intake";
+const localStoragePrefix = "recovery-hub:new-matter-intake";
+type StoredIntakeDraft = {
+  tabId: string;
+  savedAt: string;
+  data: IntakeFormData;
+};
+
+function createDraftStorageKey(id: string) {
+  return `${localStoragePrefix}:${id}`;
+}
 function Field({ label, children, error, help, required }: { label: string; children: React.ReactNode; error?: string; help?: string; required?: boolean }) {
   return (
     <div className="space-y-2">
@@ -173,30 +183,36 @@ function statusLabel(status: SaveState, lastSavedAt?: string) {
   return "Not saved yet";
 }
 
-function getInitialIntakeData(initialData?: IntakeFormData | null) {
+function getInitialIntakeData(initialData: IntakeFormData | null | undefined, storageKey: string, allowStoredDraft: boolean) {
   if (initialData) return normalizeIntakeData(initialData);
-  if (typeof window === "undefined") return normalizeIntakeData();
+  if (typeof window === "undefined" || !allowStoredDraft) return normalizeIntakeData();
 
-  const saved = window.localStorage.getItem(localStorageKey);
+  const saved = window.localStorage.getItem(storageKey);
   if (!saved) return normalizeIntakeData();
 
   try {
-    return normalizeIntakeData(JSON.parse(saved) as Partial<IntakeFormData>);
+    const parsed = JSON.parse(saved) as Partial<StoredIntakeDraft>;
+    return normalizeIntakeData(parsed.data as Partial<IntakeFormData>);
   } catch {
-    window.localStorage.removeItem(localStorageKey);
+    window.localStorage.removeItem(storageKey);
     return normalizeIntakeData();
   }
 }
 
-export function NewMatterIntake({ options, initialData, matterId: initialMatterId }: NewMatterIntakeProps) {
+export function NewMatterIntake({ options, initialData, initialLastSavedAt, matterId: initialMatterId }: NewMatterIntakeProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [data, setData] = useState<IntakeFormData>(() => getInitialIntakeData(initialData));
+  const clientDraftId = useRef(initialMatterId ?? initialData?.id ?? crypto.randomUUID());
+  const tabId = useRef(crypto.randomUUID());
+  const initialStorageKey = createDraftStorageKey(initialMatterId ?? initialData?.id ?? clientDraftId.current);
+  const [storageKey, setStorageKey] = useState(initialStorageKey);
+  const [data, setData] = useState<IntakeFormData>(() => getInitialIntakeData(initialData, initialStorageKey, Boolean(initialMatterId ?? initialData?.id)));
   const [step, setStep] = useState(() => data.step ?? 1);
   const [matterId, setMatterId] = useState(initialMatterId ?? initialData?.id ?? "");
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [lastSavedAt, setLastSavedAt] = useState<string | undefined>();
+  const [lastSavedAt, setLastSavedAt] = useState<string | undefined>(initialLastSavedAt ?? undefined);
   const [message, setMessage] = useState<string | undefined>();
+  const [draftConflict, setDraftConflict] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatterMatch[]>([]);
   const [acknowledgedDuplicate, setAcknowledgedDuplicate] = useState(false);
@@ -206,6 +222,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   const [addedCarriers, setAddedCarriers] = useState<IntakeCarrier[]>([]);
   const [addedCarrierContacts, setAddedCarrierContacts] = useState<IntakeCarrierContact[]>([]);
   const pendingAutosave = useRef(false);
+  const lastSavedAtRef = useRef<string | undefined>(initialLastSavedAt ?? undefined);
 
   const carriers = useMemo(
     () => mergeCarriers(addedCarriers, options.carriers),
@@ -234,10 +251,32 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   const unresolvedIssues = [...issueGroups.required, ...issueGroups.followUp];
 
   useEffect(() => {
-    if (!matterId) {
-      window.localStorage.setItem(localStorageKey, JSON.stringify({ ...data, step }));
-    }
-  }, [data, matterId, step]);
+    lastSavedAtRef.current = lastSavedAt;
+  }, [lastSavedAt]);
+
+  useEffect(() => {
+    if (matterId || draftConflict) return;
+    const draft: StoredIntakeDraft = { tabId: tabId.current, savedAt: new Date().toISOString(), data: { ...data, step } };
+    window.localStorage.setItem(storageKey, JSON.stringify(draft));
+  }, [data, draftConflict, matterId, step, storageKey]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== storageKey || !event.newValue) return;
+      try {
+        const draft = JSON.parse(event.newValue) as Partial<StoredIntakeDraft>;
+        if (!draft.tabId || draft.tabId === tabId.current) return;
+      } catch {
+        return;
+      }
+      setDraftConflict(true);
+      setSaveState("error");
+      setMessage("This intake draft was updated in another tab. Refresh before continuing so newer work is not overwritten.");
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [storageKey]);
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -250,13 +289,13 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   }, [dirty]);
 
   useEffect(() => {
-    if (!matterId) return;
+    if (!matterId || draftConflict) return;
     const timer = window.setTimeout(() => {
       if (pendingAutosave.current) return;
       pendingAutosave.current = true;
       setSaveState("saving");
       startTransition(async () => {
-        const result = await saveIntakeDraftAction({ matterId, data: { ...data, step }, step });
+        const result = await saveIntakeDraftAction({ matterId, data: { ...data, step }, step, lastKnownAutosavedAt: lastSavedAtRef.current });
         pendingAutosave.current = false;
         if (result.ok) {
           setSaveState("saved");
@@ -271,7 +310,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
     }, 1200);
 
     return () => window.clearTimeout(timer);
-  }, [data, matterId, startTransition, step]);
+  }, [data, draftConflict, matterId, startTransition, step]);
 
   function updateStepOne<K extends keyof IntakeFormData["stepOne"]>(key: K, value: IntakeFormData["stepOne"][K]) {
     setData((current) => ({
@@ -338,15 +377,25 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   }
 
   async function saveDraft(exit: boolean, nextStep = step) {
+    if (draftConflict) {
+      setSaveState("error");
+      setMessage("This intake draft was updated in another tab. Refresh before saving so newer work is not overwritten.");
+      return;
+    }
     setSaveState("saving");
-    const result = await saveIntakeDraftAction({ matterId: matterId || undefined, data: { ...data, step: nextStep }, step: nextStep, exit });
+    const result = await saveIntakeDraftAction({ matterId: matterId || undefined, data: { ...data, step: nextStep }, step: nextStep, exit, lastKnownAutosavedAt: lastSavedAtRef.current });
     if (result.ok) {
+      const nextStorageKey = createDraftStorageKey(result.matterId);
+      if (nextStorageKey !== storageKey) {
+        window.localStorage.removeItem(storageKey);
+        setStorageKey(nextStorageKey);
+      }
       setMatterId(result.matterId);
       setSaveState("saved");
       setLastSavedAt(result.savedAt);
       setMessage(result.message);
       setDirty(false);
-      window.localStorage.removeItem(localStorageKey);
+      window.localStorage.removeItem(nextStorageKey);
       if (result.redirectTo) router.push(result.redirectTo);
     } else {
       setSaveState("error");
@@ -366,7 +415,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
     setSaveState("saving");
     const result = await completeIntakeAction({ matterId: matterId || undefined, data: { ...data, step: 3 }, acknowledgedDuplicate });
     if (result.ok) {
-      window.localStorage.removeItem(localStorageKey);
+      window.localStorage.removeItem(storageKey);
       router.push(result.redirectTo ?? `/matters/${result.matterId}`);
       return;
     }
@@ -381,7 +430,7 @@ export function NewMatterIntake({ options, initialData, matterId: initialMatterI
   async function cancelIntake(mode: "archive" | "delete") {
     const result = await cancelIntakeAction({ matterId: matterId || undefined, mode });
     if (result.ok && result.redirectTo) {
-      window.localStorage.removeItem(localStorageKey);
+      window.localStorage.removeItem(storageKey);
       router.push(result.redirectTo);
     } else if (!result.ok) {
       setMessage(result.message);

@@ -31,8 +31,23 @@ export async function requireAdmin(): Promise<AdminGuardResult> {
   return { ok: true, profile };
 }
 
-function getSiteOrigin() {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+function getSiteOrigin(): { ok: true; origin: string } | { ok: false } {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL;
+  if (configured) return { ok: true, origin: configured };
+  if (process.env.NODE_ENV === "production") {
+    console.error("[users/service] NEXT_PUBLIC_SITE_URL is not set in production — refusing to build an invite/reset link against localhost.");
+    return { ok: false };
+  }
+  return { ok: true, origin: "http://localhost:3000" };
+}
+
+/**
+ * User-facing messages stay generic (never leak raw Postgres/Auth errors), but every
+ * failure is logged server-side with enough context (action, target, error) for an
+ * operator to actually diagnose a support ticket instead of just seeing "something failed."
+ */
+function logServiceError(action: string, context: Record<string, unknown>, error: unknown) {
+  console.error(`[users/service] ${action} failed`, { ...context, error });
 }
 
 type AuthStatus = { confirmedAt: string | null; lastSignInAt: string | null };
@@ -138,13 +153,29 @@ export async function inviteUser(
   // redirectTo only needs to pass Supabase's allow-listed redirect URL check now —
   // the actual invite link is built from {{ .TokenHash }} in the Supabase email
   // template (see docs/supabase-foundation.md), not from this value.
-  const redirectTo = `${getSiteOrigin()}/reset-password`;
+  const origin = getSiteOrigin();
+  if (!origin.ok) {
+    return { ok: false, message: "Recovery Hub is not fully configured (missing site URL). Contact an administrator before sending invitations." };
+  }
+  const redirectTo = `${origin.origin}/reset-password`;
   const { data, error } = await admin.auth.admin.inviteUserByEmail(input.email, {
     data: { full_name: input.fullName },
     redirectTo,
   });
 
   if (error || !data.user) {
+    logServiceError("inviteUser", { email: input.email }, error);
+    // A concurrent invite for the same email (two admins inviting at once) is the most common
+    // cause of this failing right after the pre-check above passed — the profiles.email/
+    // auth.users.email uniqueness constraints are the real guard, this pre-check is just a
+    // fast-path. Distinguish that case so the losing admin isn't left guessing.
+    const { data: nowExists } = await supabase.from("profiles").select("id").ilike("email", input.email).maybeSingle();
+    if (nowExists) {
+      return {
+        ok: false,
+        message: "Someone else just invited this email address. Refresh the list — if they need a different role or access, edit them instead of re-inviting.",
+      };
+    }
     return { ok: false, message: "We could not send an invitation to that address. It may already be registered." };
   }
 
@@ -161,6 +192,7 @@ export async function inviteUser(
   );
 
   if (profileError) {
+    logServiceError("inviteUser", { email: input.email, authUserId: data.user.id }, profileError);
     return {
       ok: false,
       message: `${input.email} was invited, but we could not apply the selected role and access. They currently have default read-only, inactive access — edit them from the list to fix this.`,
@@ -188,8 +220,12 @@ export async function updateUser(
     .eq("id", input.userId)
     .maybeSingle();
 
-  if (fetchError || !target) {
-    return { ok: false, message: "We could not find that user." };
+  if (fetchError) {
+    logServiceError("updateUser", { userId: input.userId }, fetchError);
+    return { ok: false, message: "We could not look up this user. Try again shortly." };
+  }
+  if (!target) {
+    return { ok: false, message: "We could not find that user. They may have been removed." };
   }
 
   const isSelf = target.id === actingAdmin.id;
@@ -206,7 +242,7 @@ export async function updateUser(
     return { ok: false, message: "At least one active administrator is required. Promote another admin before changing this." };
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("profiles")
     .update({
       full_name: input.fullName,
@@ -214,10 +250,17 @@ export async function updateUser(
       role: input.role,
       is_active: input.isActive,
     })
-    .eq("id", input.userId);
+    .eq("id", input.userId)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
+    logServiceError("updateUser", { userId: input.userId }, error);
     return { ok: false, message: "We could not update this user." };
+  }
+  if (!updated) {
+    logServiceError("updateUser", { userId: input.userId }, "update matched 0 rows");
+    return { ok: false, message: "This user could not be updated — they may have been removed or changed by someone else. Refresh and try again." };
   }
 
   await logUserActivity({
@@ -242,18 +285,27 @@ export async function setUserActiveStatus(userId: string, isActive: boolean, act
     .eq("id", userId)
     .maybeSingle();
 
-  if (fetchError || !target) {
-    return { ok: false, message: "We could not find that user." };
+  if (fetchError) {
+    logServiceError("setUserActiveStatus", { userId }, fetchError);
+    return { ok: false, message: "We could not look up this user. Try again shortly." };
+  }
+  if (!target) {
+    return { ok: false, message: "We could not find that user. They may have been removed." };
   }
 
   if (!isActive && target.role === "admin" && target.is_active && !(await hasOtherActiveAdmin(userId))) {
     return { ok: false, message: "At least one active administrator is required." };
   }
 
-  const { error } = await supabase.from("profiles").update({ is_active: isActive }).eq("id", userId);
+  const { data: updated, error } = await supabase.from("profiles").update({ is_active: isActive }).eq("id", userId).select("id").maybeSingle();
 
   if (error) {
+    logServiceError("setUserActiveStatus", { userId }, error);
     return { ok: false, message: "We could not update this user's access." };
+  }
+  if (!updated) {
+    logServiceError("setUserActiveStatus", { userId }, "update matched 0 rows");
+    return { ok: false, message: "This user's access could not be updated — they may have been removed or changed by someone else. Refresh and try again." };
   }
 
   await logUserActivity({
@@ -278,18 +330,27 @@ export async function removeUserAccess(userId: string, actingAdmin: Profile): Pr
     .eq("id", userId)
     .maybeSingle();
 
-  if (fetchError || !target) {
-    return { ok: false, message: "We could not find that user." };
+  if (fetchError) {
+    logServiceError("removeUserAccess", { userId }, fetchError);
+    return { ok: false, message: "We could not look up this user. Try again shortly." };
+  }
+  if (!target) {
+    return { ok: false, message: "We could not find that user. They may have been removed." };
   }
 
   if (target.role === "admin" && target.is_active && !(await hasOtherActiveAdmin(userId))) {
     return { ok: false, message: "At least one active administrator is required." };
   }
 
-  const { error } = await supabase.from("profiles").update({ is_active: false }).eq("id", userId);
+  const { data: updated, error } = await supabase.from("profiles").update({ is_active: false }).eq("id", userId).select("id").maybeSingle();
 
   if (error) {
+    logServiceError("removeUserAccess", { userId }, error);
     return { ok: false, message: "We could not remove access for this user." };
+  }
+  if (!updated) {
+    logServiceError("removeUserAccess", { userId }, "update matched 0 rows");
+    return { ok: false, message: "This user's access could not be removed — they may have already been removed by someone else. Refresh and try again." };
   }
 
   await logUserActivity({
@@ -315,12 +376,17 @@ export async function resendInvitation(userId: string, actingAdmin: Profile): Pr
     .eq("id", userId)
     .maybeSingle();
 
-  if (fetchError || !target) {
-    return { ok: false, message: "We could not find that user." };
+  if (fetchError) {
+    logServiceError("resendInvitation", { userId }, fetchError);
+    return { ok: false, message: "We could not look up this user. Try again shortly." };
+  }
+  if (!target) {
+    return { ok: false, message: "We could not find that user. They may have been removed." };
   }
 
   const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId);
   if (authError || !authUser?.user) {
+    logServiceError("resendInvitation", { userId }, authError ?? "auth user not found");
     return { ok: false, message: "We could not find this user's account." };
   }
 
@@ -333,13 +399,18 @@ export async function resendInvitation(userId: string, actingAdmin: Profile): Pr
   // documented way to resend an unconfirmed invite. This is deliberately not
   // supabase.auth.resend(), whose `type` is restricted to "signup" |
   // "email_change" and does not support "invite" at all.
-  const redirectTo = `${getSiteOrigin()}/reset-password`;
+  const origin = getSiteOrigin();
+  if (!origin.ok) {
+    return { ok: false, message: "Recovery Hub is not fully configured (missing site URL). Contact an administrator before resending invitations." };
+  }
+  const redirectTo = `${origin.origin}/reset-password`;
   const { error } = await admin.auth.admin.inviteUserByEmail(target.email, {
     data: { full_name: target.full_name },
     redirectTo,
   });
 
   if (error) {
+    logServiceError("resendInvitation", { userId, email: target.email }, error);
     return { ok: false, message: "We could not resend the invitation. Try again shortly." };
   }
 

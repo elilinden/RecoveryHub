@@ -127,10 +127,25 @@ export async function resetPasswordAction(
 
   try {
     const supabase = await createClient();
-    const { error } = await supabase.auth.updateUser({ password });
+    const { data, error } = await supabase.auth.updateUser({ password });
 
     if (error) {
       return { status: "error", message: "This reset link is expired or invalid." };
+    }
+
+    // An admin can invite a user without activating them yet. The password gets set
+    // successfully here, but sign-in will still be blocked — say so now instead of
+    // reporting an unqualified "success" that a later, seemingly unrelated "account
+    // inactive" error at login would contradict.
+    const userId = data.user?.id;
+    if (userId) {
+      const { data: profile } = await supabase.from("profiles").select("is_active").eq("id", userId).maybeSingle();
+      if (profile && !profile.is_active) {
+        return {
+          status: "success",
+          message: "Your password has been set, but your account is not active yet. Ask an administrator to activate it before you can sign in.",
+        };
+      }
     }
   } catch {
     return { status: "error", message: "Recovery Hub is not connected to Supabase yet." };

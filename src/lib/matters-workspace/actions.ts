@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { submitWithActionFeedback } from "@/lib/action-feedback/server";
 import { getCurrentProfile, type Profile, type ProfileRole } from "@/lib/data/profiles";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -201,7 +202,7 @@ export async function updateCurrentStatusAction(formData: FormData): Promise<Wor
 }
 
 export async function submitUpdateCurrentStatusAction(formData: FormData) {
-  await updateCurrentStatusAction(formData);
+  await submitWithActionFeedback(updateCurrentStatusAction, formData);
 }
 
 export async function updateFinancialsAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -232,7 +233,7 @@ export async function updateFinancialsAction(formData: FormData): Promise<Worksp
 }
 
 export async function submitUpdateFinancialsAction(formData: FormData) {
-  await updateFinancialsAction(formData);
+  await submitWithActionFeedback(updateFinancialsAction, formData);
 }
 
 export async function upsertEvidenceAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -265,42 +266,62 @@ export async function upsertEvidenceAction(formData: FormData): Promise<Workspac
 }
 
 export async function submitUpsertEvidenceAction(formData: FormData) {
-  await upsertEvidenceAction(formData);
+  await submitWithActionFeedback(upsertEvidenceAction, formData);
 }
 
 export async function upsertDeadlineAction(formData: FormData): Promise<WorkspaceActionResult> {
   const parsed = parseForm(deadlineSchema, formData);
   if (!parsed.ok) return parsed.result;
-  const permission = await requirePermission(parsed.data.verify ? "legal" : "edit");
+  const shouldVerify = Boolean(parsed.data.verify);
+  const permission = await requirePermission(shouldVerify ? "legal" : "edit");
   if (!permission.ok) return permission.result;
   if (!isSupabaseConfigured()) return { ok: true, message: "Deadline saved in development mode." };
   const supabase = await createClient();
   const now = new Date().toISOString();
-  const values = {
-    matter_id: parsed.data.matterId,
+  const { data: existingDeadline, error: existingDeadlineError } = parsed.data.deadlineId && shouldVerify
+    ? await supabase
+        .from("deadlines")
+        .select("is_verified,verified_by,verified_at")
+        .eq("id", parsed.data.deadlineId)
+        .eq("matter_id", parsed.data.matterId)
+        .maybeSingle()
+    : { data: null, error: null };
+  if (existingDeadlineError) return { ok: false, message: "We could not load this deadline." };
+  if (parsed.data.deadlineId && shouldVerify && !existingDeadline) return { ok: false, message: "We could not find this deadline." };
+  const values: Record<string, unknown> = {
     title: parsed.data.title,
     deadline_type: parsed.data.deadlineType,
     deadline_date: parsed.data.deadlineDate,
     reminder_date: parsed.data.reminderDate || null,
-    assigned_to: parsed.data.assignedTo || null,
     notes: parsed.data.notes || null,
-    is_verified: Boolean(parsed.data.verify),
-    verified_by: parsed.data.verify ? permission.profile.id : null,
-    verified_at: parsed.data.verify ? now : null,
-    created_by: permission.profile.id,
   };
+
+  if (parsed.data.deadlineId) {
+    if (formData.has("assignedTo")) values.assigned_to = parsed.data.assignedTo || null;
+  } else {
+    values.matter_id = parsed.data.matterId;
+    values.assigned_to = parsed.data.assignedTo || null;
+    values.created_by = permission.profile.id;
+  }
+
+  if (shouldVerify) {
+    values.is_verified = true;
+    values.verified_by = existingDeadline?.is_verified && typeof existingDeadline.verified_by === "string" ? existingDeadline.verified_by : permission.profile.id;
+    values.verified_at = existingDeadline?.is_verified && typeof existingDeadline.verified_at === "string" ? existingDeadline.verified_at : now;
+  }
+
   const query = parsed.data.deadlineId
-    ? supabase.from("deadlines").update(values).eq("id", parsed.data.deadlineId).select("id").single()
+    ? supabase.from("deadlines").update(values).eq("id", parsed.data.deadlineId).eq("matter_id", parsed.data.matterId).select("id").single()
     : supabase.from("deadlines").insert(values).select("id").single();
   const { error } = await query;
   if (error) return { ok: false, message: "We could not save this deadline." };
-  await logActivity(parsed.data.matterId, permission.profile.id, parsed.data.verify ? "verify_deadline" : "update_deadline", "deadline", parsed.data.deadlineId || null, parsed.data.verify ? "Deadline verified." : "Deadline updated.", { deadline_date: parsed.data.deadlineDate });
+  await logActivity(parsed.data.matterId, permission.profile.id, shouldVerify ? "verify_deadline" : "update_deadline", "deadline", parsed.data.deadlineId || null, shouldVerify ? "Deadline verified." : "Deadline updated.", { deadline_date: parsed.data.deadlineDate });
   revalidateMatter(parsed.data.matterId);
-  return { ok: true, message: parsed.data.verify ? "Deadline verified." : "Deadline saved." };
+  return { ok: true, message: shouldVerify ? "Deadline verified." : "Deadline saved." };
 }
 
 export async function submitUpsertDeadlineAction(formData: FormData) {
-  await upsertDeadlineAction(formData);
+  await submitWithActionFeedback(upsertDeadlineAction, formData);
 }
 
 export async function upsertTaskAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -310,19 +331,25 @@ export async function upsertTaskAction(formData: FormData): Promise<WorkspaceAct
   if (!permission.ok) return permission.result;
   if (!isSupabaseConfigured()) return { ok: true, message: "Task saved in development mode." };
   const supabase = await createClient();
-  const values = {
-    matter_id: parsed.data.matterId,
+  const values: Record<string, unknown> = {
     title: parsed.data.title,
     description: parsed.data.description || null,
-    assigned_to: parsed.data.assignedTo || null,
     due_date: parsed.data.dueDate || null,
     priority: parsed.data.priority,
     status: parsed.data.status,
     completed_at: parsed.data.status === "completed" ? new Date().toISOString() : null,
-    created_by: permission.profile.id,
   };
+
+  if (parsed.data.taskId) {
+    if (formData.has("assignedTo")) values.assigned_to = parsed.data.assignedTo || null;
+  } else {
+    values.matter_id = parsed.data.matterId;
+    values.assigned_to = parsed.data.assignedTo || null;
+    values.created_by = permission.profile.id;
+  }
+
   const query = parsed.data.taskId
-    ? supabase.from("tasks").update(values).eq("id", parsed.data.taskId).select("id").single()
+    ? supabase.from("tasks").update(values).eq("id", parsed.data.taskId).eq("matter_id", parsed.data.matterId).select("id").single()
     : supabase.from("tasks").insert(values).select("id").single();
   const { error } = await query;
   if (error) return { ok: false, message: "We could not save this task." };
@@ -335,7 +362,7 @@ export async function upsertTaskAction(formData: FormData): Promise<WorkspaceAct
 }
 
 export async function submitUpsertTaskAction(formData: FormData) {
-  await upsertTaskAction(formData);
+  await submitWithActionFeedback(upsertTaskAction, formData);
 }
 
 export async function upsertPartyAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -377,7 +404,7 @@ export async function upsertPartyAction(formData: FormData): Promise<WorkspaceAc
 }
 
 export async function submitUpsertPartyAction(formData: FormData) {
-  await upsertPartyAction(formData);
+  await submitWithActionFeedback(upsertPartyAction, formData);
 }
 
 export async function addMatterEventAction(_state: WorkspaceActionResult, formData: FormData): Promise<WorkspaceActionResult> {
@@ -387,23 +414,32 @@ export async function addMatterEventAction(_state: WorkspaceActionResult, formDa
   if (!permission.ok) return permission.result;
   if (!isSupabaseConfigured()) return { ok: true, message: "Matter event added in development mode." };
 
+  const now = new Date();
   const occurredAt = parsed.data.occurredTime
     ? `${today()}T${parsed.data.occurredTime}:00`
-    : new Date().toISOString();
+    : new Date(Math.floor(now.getTime() / 15_000) * 15_000).toISOString();
 
   const supabase = await createClient();
-  const recentDuplicateWindow = new Date(Date.now() - 15_000).toISOString();
-  const { data: recentDuplicate } = await supabase
+  const recentDuplicateWindow = new Date(now.getTime() - 15_000).toISOString();
+  let duplicateQuery = supabase
     .from("matter_events")
     .select("id")
     .eq("matter_id", parsed.data.matterId)
     .eq("recorded_by", permission.profile.id)
     .eq("event_type", parsed.data.eventType)
     .eq("description", parsed.data.description)
-    .eq("occurred_at", occurredAt)
-    .gte("created_at", recentDuplicateWindow)
-    .limit(1)
-    .maybeSingle();
+    .gte("created_at", recentDuplicateWindow);
+
+  // When the user left Time blank we auto-compute occurredAt by rounding to a coarse bucket.
+  // Two near-simultaneous submissions (double-click, two open tabs) could straddle a bucket
+  // boundary and end up with different occurredAt values even though they're the same real
+  // action, which would defeat an exact occurred_at match. In that case we rely solely on the
+  // matter/actor/type/description + recent created_at window as the idempotency key instead of
+  // also requiring occurred_at equality. When the user explicitly picked a Time, keep the exact
+  // occurred_at match since two distinct explicit times are meaningfully different entries.
+  duplicateQuery = parsed.data.occurredTime ? duplicateQuery.eq("occurred_at", occurredAt) : duplicateQuery;
+
+  const { data: recentDuplicate } = await duplicateQuery.limit(1).maybeSingle();
 
   if (!recentDuplicate) {
     await addMatterEvent(parsed.data.matterId, permission.profile.id, parsed.data.eventType, parsed.data.description, occurredAt);
@@ -413,6 +449,28 @@ export async function addMatterEventAction(_state: WorkspaceActionResult, formDa
 }
 
 
+async function loadEventForModeration(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  eventId: string,
+  actorId: string,
+  actorRole: ProfileRole,
+  action: string
+): Promise<{ ok: true } | { ok: false; result: WorkspaceActionResult }> {
+  const { data: existing, error } = await supabase.from("matter_events").select("id,recorded_by,source").eq("id", eventId).maybeSingle();
+  if (error) {
+    console.error(`${action}: could not look up event`, { eventId, error });
+    return { ok: false, result: { ok: false, message: "We could not look up this entry. Try again shortly." } };
+  }
+  if (!existing) {
+    return { ok: false, result: { ok: false, message: "This entry no longer exists. It may have already been removed." } };
+  }
+  const isOwnManualEntry = existing.source === "manual" && existing.recorded_by === actorId;
+  if (!isOwnManualEntry && actorRole !== "admin") {
+    return { ok: false, result: { ok: false, message: "You can only strike through your own entries." } };
+  }
+  return { ok: true };
+}
+
 export async function strikeMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
   const parsed = parseForm(eventIdSchema, formData);
   if (!parsed.ok) return parsed.result;
@@ -421,20 +479,26 @@ export async function strikeMatterEventAction(formData: FormData): Promise<Works
   if (!isSupabaseConfigured()) return { ok: true, message: "Entry struck through in development mode." };
 
   const supabase = await createClient();
+  const ownership = await loadEventForModeration(supabase, parsed.data.eventId, permission.profile.id, permission.profile.role, "strikeMatterEventAction");
+  if (!ownership.ok) return ownership.result;
+
   const { error } = await supabase
     .from("matter_events")
     .update({ struck_through_at: new Date().toISOString(), struck_through_by: permission.profile.id })
     .eq("id", parsed.data.eventId)
     .select("id")
     .single();
-  if (error) return { ok: false, message: "We could not update this entry. You can only strike through your own entries." };
+  if (error) {
+    console.error("strikeMatterEventAction: update failed", { eventId: parsed.data.eventId, error });
+    return { ok: false, message: "We could not update this entry. Try again shortly." };
+  }
 
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: "Entry struck through." };
 }
 
 export async function submitStrikeMatterEventAction(formData: FormData) {
-  await strikeMatterEventAction(formData);
+  await submitWithActionFeedback(strikeMatterEventAction, formData);
 }
 
 export async function restoreMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -445,20 +509,26 @@ export async function restoreMatterEventAction(formData: FormData): Promise<Work
   if (!isSupabaseConfigured()) return { ok: true, message: "Entry restored in development mode." };
 
   const supabase = await createClient();
+  const ownership = await loadEventForModeration(supabase, parsed.data.eventId, permission.profile.id, permission.profile.role, "restoreMatterEventAction");
+  if (!ownership.ok) return ownership.result;
+
   const { error } = await supabase
     .from("matter_events")
     .update({ struck_through_at: null, struck_through_by: null })
     .eq("id", parsed.data.eventId)
     .select("id")
     .single();
-  if (error) return { ok: false, message: "We could not restore this entry." };
+  if (error) {
+    console.error("restoreMatterEventAction: update failed", { eventId: parsed.data.eventId, error });
+    return { ok: false, message: "We could not restore this entry. Try again shortly." };
+  }
 
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: "Entry restored." };
 }
 
 export async function submitRestoreMatterEventAction(formData: FormData) {
-  await restoreMatterEventAction(formData);
+  await submitWithActionFeedback(restoreMatterEventAction, formData);
 }
 
 export async function deleteMatterEventAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -481,7 +551,7 @@ export async function deleteMatterEventAction(formData: FormData): Promise<Works
 }
 
 export async function submitDeleteMatterEventAction(formData: FormData) {
-  await deleteMatterEventAction(formData);
+  await submitWithActionFeedback(deleteMatterEventAction, formData);
 }
 
 export async function closeMatterAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -492,21 +562,27 @@ export async function closeMatterAction(formData: FormData): Promise<WorkspaceAc
   if (!isSupabaseConfigured()) return { ok: true, message: "Matter closed in development mode." };
   const supabase = await createClient();
   const closedAt = `${parsed.data.closingDate}T12:00:00.000Z`;
-  const { error } = await supabase
+  // Conditioning the update on the matter not already being closed makes this idempotent at the
+  // database level: a double-click (two near-simultaneous submissions) only lets the first one
+  // through, so we never log a second "matter closed" event/activity entry for one real action.
+  const { data: updated, error } = await supabase
     .from("matters")
     .update({ stage: "closed", closed_at: closedAt, closed_reason: parsed.data.reason, closed_by: permission.profile.id })
     .eq("id", parsed.data.matterId)
+    .neq("stage", "closed")
     .select("id")
-    .single();
-  if (error) return { ok: false, message: "We could not close this matter." };
+    .maybeSingle();
+  if (error) {
+    console.error("closeMatterAction: update failed", { matterId: parsed.data.matterId, error });
+    return { ok: false, message: "We could not close this matter." };
+  }
+  if (!updated) {
+    return { ok: true, message: "This matter is already closed." };
+  }
   await addMatterEvent(parsed.data.matterId, permission.profile.id, "matter_closed", parsed.data.note || `Matter closed: ${parsed.data.reason}`, closedAt);
   await logActivity(parsed.data.matterId, permission.profile.id, "close_matter", "matter", parsed.data.matterId, "Matter closed.", { reason: parsed.data.reason });
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: "Matter closed." };
-}
-
-export async function submitCloseMatterAction(formData: FormData) {
-  await closeMatterAction(formData);
 }
 
 export async function reopenMatterAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -516,7 +592,10 @@ export async function reopenMatterAction(formData: FormData): Promise<WorkspaceA
   if (!permission.ok) return permission.result;
   if (!isSupabaseConfigured()) return { ok: true, message: "Matter reopened in development mode." };
   const supabase = await createClient();
-  const { error } = await supabase
+  // Conditioning the update on the matter currently being closed makes this idempotent: a
+  // double-click only lets the first submission through, so a duplicate "matter reopened"
+  // event/activity entry is never logged for one real action.
+  const { data: updated, error } = await supabase
     .from("matters")
     .update({
       stage: parsed.data.stage,
@@ -526,17 +605,20 @@ export async function reopenMatterAction(formData: FormData): Promise<WorkspaceA
       last_substantive_activity_at: new Date().toISOString(),
     })
     .eq("id", parsed.data.matterId)
+    .eq("stage", "closed")
     .select("id")
-    .single();
-  if (error) return { ok: false, message: "We could not reopen this matter." };
+    .maybeSingle();
+  if (error) {
+    console.error("reopenMatterAction: update failed", { matterId: parsed.data.matterId, error });
+    return { ok: false, message: "We could not reopen this matter." };
+  }
+  if (!updated) {
+    return { ok: true, message: "This matter is already open." };
+  }
   await addMatterEvent(parsed.data.matterId, permission.profile.id, "other", `Matter reopened: ${parsed.data.reason}`);
   await logActivity(parsed.data.matterId, permission.profile.id, "reopen_matter", "matter", parsed.data.matterId, "Matter reopened.", { stage: parsed.data.stage });
   revalidateMatter(parsed.data.matterId);
   return { ok: true, message: "Matter reopened." };
-}
-
-export async function submitReopenMatterAction(formData: FormData) {
-  await reopenMatterAction(formData);
 }
 
 export async function archiveMatterAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -553,7 +635,7 @@ export async function archiveMatterAction(formData: FormData): Promise<Workspace
 }
 
 export async function submitArchiveMatterAction(formData: FormData) {
-  await archiveMatterAction(formData);
+  await submitWithActionFeedback(archiveMatterAction, formData);
 }
 
 export async function restoreMatterAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -570,7 +652,7 @@ export async function restoreMatterAction(formData: FormData): Promise<Workspace
 }
 
 export async function submitRestoreMatterAction(formData: FormData) {
-  await restoreMatterAction(formData);
+  await submitWithActionFeedback(restoreMatterAction, formData);
 }
 
 export async function saveMatterViewAction(formData: FormData): Promise<WorkspaceActionResult> {
@@ -598,7 +680,7 @@ export async function saveMatterViewAction(formData: FormData): Promise<Workspac
 }
 
 export async function submitSaveMatterViewAction(formData: FormData) {
-  await saveMatterViewAction(formData);
+  await submitWithActionFeedback(saveMatterViewAction, formData);
 }
 
 async function addMatterEvent(matterId: string, actorId: string, eventType: string, description: string, occurredAt = new Date().toISOString()) {

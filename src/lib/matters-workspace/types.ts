@@ -149,7 +149,9 @@ export type MatterListItem = {
   currentIntakeStep: number;
   lastAutosavedAt: string | null;
   assignedAdjusterName: string | null;
+  assignedAttorneyId: string | null;
   assignedAttorneyName: string | null;
+  assignedStaffId: string | null;
   assignedStaffName: string | null;
   assignedFirmUser: string;
   amountSought: number;
@@ -198,8 +200,6 @@ export type MatterDetail = MatterListItem & {
   adjusterEmail: string | null;
   adjusterPhone: string | null;
   adjusterDepartment: string | null;
-  assignedAttorneyId: string | null;
-  assignedStaffId: string | null;
   dateReferred: string | null;
   dateOfLoss: string | null;
   venue: string | null;
@@ -271,6 +271,7 @@ export type EvidenceItem = {
   dateRequested: string | null;
   dateReceived: string | null;
   notes: string | null;
+  documentLinks?: Array<{ documentId: string; title: string; displayFilename: string }>;
   updatedAt: string;
 };
 

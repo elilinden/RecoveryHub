@@ -3,12 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { submitWithActionFeedback } from "@/lib/action-feedback/server";
 import { getCurrentProfile, type Profile, type ProfileRole } from "@/lib/data/profiles";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createDocumentId, createStoragePath, matterDocumentBucket, validateDocumentFileMetadata } from "@/lib/documents-packages/storage";
-import { scanFileForMalware } from "@/lib/documents-packages/scanning";
+import { isScanningConfigured, scanFileForMalware } from "@/lib/documents-packages/scanning";
 import { getPackageApprovalBlockers, resetVerificationOnEmailChange } from "@/lib/documents-packages/validation";
 import type { DocumentScanStatus, DocumentStatus, OutboundPackage } from "@/lib/documents-packages/types";
 
@@ -46,6 +47,7 @@ const packageSchema = z.object({
 
 const recipientSchema = z.object({
   packageId: z.string().trim().min(1),
+  recipientId: z.string().trim().optional().or(z.literal("")),
   recipientName: z.string().trim().min(1),
   organizationName: z.string().trim().optional().or(z.literal("")),
   emailAddress: z.string().trim().email().optional().or(z.literal("")),
@@ -61,8 +63,17 @@ const packageIdSchema = z.object({
   packageId: z.string().trim().min(1),
 });
 
+const documentScanSchema = z.object({
+  matterId: matterIdSchema,
+  documentId: z.string().trim().min(1),
+});
+
 const reviewSchema = packageIdSchema.extend({
   comments: z.string().trim().max(700).optional().or(z.literal("")),
+});
+
+const requestChangesSchema = packageIdSchema.extend({
+  comments: z.string().trim().min(3, "Explain what needs to change.").max(700),
 });
 
 function canEdit(role: ProfileRole) {
@@ -125,46 +136,62 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
   const files = formData.getAll("files").filter((file): file is File => file instanceof File && file.size > 0);
   if (files.length === 0) return { ok: false, message: "Select at least one supported file." };
 
-  const validatedFiles = [];
+  const uploadFailures: string[] = [];
+  const uploadWarnings: string[] = [];
+  let uploadedCount = 0;
+  let acceptedCount = 0;
+  const supabase = isSupabaseConfigured() ? await createClient() : null;
+
   for (const file of files) {
-    const bytes = await file.arrayBuffer();
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await file.arrayBuffer();
+    } catch {
+      uploadFailures.push(`${file.name}: The file could not be read.`);
+      continue;
+    }
     const validation = validateDocumentFileMetadata({ name: file.name, type: file.type, size: file.size, bytes });
-    if (!validation.ok) return { ok: false, message: `${file.name}: ${validation.message}` };
-    validatedFiles.push({ file, bytes, validation });
-  }
+    if (!validation.ok) {
+      uploadFailures.push(`${file.name}: ${validation.message}`);
+      continue;
+    }
 
-  if (!isSupabaseConfigured()) return { ok: true, message: `${validatedFiles.length} document${validatedFiles.length === 1 ? "" : "s"} accepted in development mode.` };
+    if (!supabase) {
+      acceptedCount += 1;
+      continue;
+    }
 
-  const supabase = await createClient();
-  for (const item of validatedFiles) {
     const documentId = createDocumentId();
     const storagePath = createStoragePath({
       matterId: parsed.data.matterId,
       documentId,
-      filename: item.validation.safeDisplayFilename,
+      filename: validation.safeDisplayFilename,
     });
-    const { error: uploadError } = await supabase.storage.from(matterDocumentBucket).upload(storagePath, item.file, {
-      contentType: item.validation.mimeType,
+    const { error: uploadError } = await supabase.storage.from(matterDocumentBucket).upload(storagePath, file, {
+      contentType: validation.mimeType,
       upsert: false,
     });
-    if (uploadError) return { ok: false, message: "Upload failed. No public URL was created." };
+    if (uploadError) {
+      uploadFailures.push(`${file.name}: Upload failed. No public URL was created.`);
+      continue;
+    }
 
     const { data, error } = await supabase.from("matter_documents").insert({
       id: documentId,
       matter_id: parsed.data.matterId,
-      title: files.length === 1 ? parsed.data.title : `${parsed.data.title} - ${item.validation.safeDisplayFilename}`,
+      title: files.length === 1 ? parsed.data.title : `${parsed.data.title} - ${validation.safeDisplayFilename}`,
       document_type: parsed.data.documentType,
       description: parsed.data.description || null,
       document_date: parsed.data.documentDate || null,
       source_type: "uploaded",
       storage_provider: "supabase",
       storage_path: storagePath,
-      original_filename: item.file.name,
-      display_filename: item.validation.safeDisplayFilename,
-      mime_type: item.validation.mimeType,
-      file_extension: item.validation.fileExtension,
-      file_size_bytes: item.file.size,
-      file_hash: item.validation.fileHash,
+      original_filename: file.name,
+      display_filename: validation.safeDisplayFilename,
+      mime_type: validation.mimeType,
+      file_extension: validation.fileExtension,
+      file_size_bytes: file.size,
+      file_hash: validation.fileHash,
       status: "processing",
       scan_status: "pending",
       visibility: parsed.data.visibility,
@@ -172,9 +199,26 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
     }).select("id").single();
 
     if (error) {
-      await deleteOrphanedUpload(storagePath);
-      return { ok: false, message: "The file uploaded, but document metadata could not be saved. The upload was removed; try again." };
+      const cleanup = await deleteOrphanedUpload(storagePath);
+      if (!cleanup.removed) {
+        await logActivity(
+          parsed.data.matterId,
+          permission.profile.id,
+          "document_upload_cleanup_failed",
+          "matter_document",
+          documentId,
+          "Document metadata failed and storage cleanup did not remove the uploaded file.",
+          { storage_path: storagePath, reason: cleanup.reason }
+        );
+      }
+      uploadFailures.push(
+        cleanup.removed
+          ? `${file.name}: Metadata could not be saved. The upload was removed; try again.`
+          : `${file.name}: Metadata could not be saved, and the uploaded file was not removed because ${cleanup.reason}. An activity entry records the storage path for an administrator.`
+      );
+      continue;
     }
+    uploadedCount += 1;
 
     if (parsed.data.evidenceItemId) {
       await supabase.from("evidence_document_links").insert({
@@ -185,35 +229,93 @@ export async function uploadMatterDocumentsAction(formData: FormData): Promise<D
     }
     await logActivity(parsed.data.matterId, permission.profile.id, "document_uploaded", "matter_document", String(data.id), "Document uploaded.", { scan_status: "pending" });
 
-    const scanOutcome = await scanFileForMalware({
-      bytes: item.bytes,
-      filename: item.validation.safeDisplayFilename,
-      mimeType: item.validation.mimeType,
-    });
-    const resolvedStatus = statusForScanOutcome(scanOutcome);
-    await supabase.from("matter_documents").update({ status: resolvedStatus, scan_status: scanOutcome }).eq("id", documentId);
-    if (scanOutcome === "flagged") {
-      await logActivity(parsed.data.matterId, permission.profile.id, "document_flagged", "matter_document", String(data.id), "Uploaded file was flagged by malware scanning and quarantined.", { scan_status: scanOutcome });
+    if (!isScanningConfigured()) {
+      await supabase.from("matter_documents").update({ status: "failed", scan_status: "scan_failed" }).eq("id", documentId);
+      uploadWarnings.push(`${file.name}: Uploaded, but malware scanning is not configured.`);
     }
   }
-  revalidateMatter(parsed.data.matterId);
-  return { ok: true, message: `${validatedFiles.length} document${validatedFiles.length === 1 ? "" : "s"} uploaded.` };
+
+  if (!supabase) {
+    if (acceptedCount === 0) return { ok: false, message: `No documents accepted. ${formatUploadMessages(uploadFailures)}` };
+    return { ok: true, message: `${acceptedCount} document${acceptedCount === 1 ? "" : "s"} accepted in development mode.${uploadFailures.length ? ` ${uploadFailures.length} skipped: ${formatUploadMessages(uploadFailures)}` : ""}` };
+  }
+
+  if (uploadedCount > 0) revalidateMatter(parsed.data.matterId);
+  if (uploadedCount === 0) return { ok: false, message: `No documents uploaded. ${formatUploadMessages(uploadFailures)}` };
+  const skippedMessage = uploadFailures.length ? ` ${uploadFailures.length} skipped: ${formatUploadMessages(uploadFailures)}` : "";
+  const warningMessage = uploadWarnings.length ? ` ${formatUploadMessages(uploadWarnings)}` : "";
+  const scanningMessage = isScanningConfigured() ? " Scanning is pending; use Retry scan if it does not clear." : "";
+  return { ok: true, message: `${uploadedCount} document${uploadedCount === 1 ? "" : "s"} uploaded.${skippedMessage}${warningMessage}${scanningMessage}` };
+}
+
+function formatUploadMessages(messages: string[]) {
+  if (messages.length === 0) return "";
+  const visibleMessages = messages.slice(0, 3).join(" ");
+  return messages.length > 3 ? `${visibleMessages} +${messages.length - 3} more.` : visibleMessages;
 }
 
 function statusForScanOutcome(scanOutcome: DocumentScanStatus): DocumentStatus {
   if (scanOutcome === "clean") return "available";
   if (scanOutcome === "flagged") return "quarantined";
+  if (scanOutcome === "scan_failed") return "failed";
   return "processing";
 }
 
-async function deleteOrphanedUpload(storagePath: string) {
+async function deleteOrphanedUpload(storagePath: string): Promise<{ removed: boolean; reason?: string }> {
   const admin = createAdminClient();
-  if (!admin) return;
-  await admin.storage.from(matterDocumentBucket).remove([storagePath]);
+  if (!admin) return { removed: false, reason: "Supabase service-role storage access is not configured" };
+  const { error } = await admin.storage.from(matterDocumentBucket).remove([storagePath]);
+  if (error) return { removed: false, reason: "storage cleanup failed" };
+  return { removed: true };
 }
 
 export async function submitUploadMatterDocumentsAction(formData: FormData) {
-  await uploadMatterDocumentsAction(formData);
+  await submitWithActionFeedback(uploadMatterDocumentsAction, formData);
+}
+
+export async function retryDocumentScanAction(formData: FormData): Promise<DocumentPackageActionResult> {
+  const parsed = parseForm(documentScanSchema, formData);
+  if (!parsed.ok) return parsed.result;
+  const permission = await requireRole("edit");
+  if (!permission.ok) return permission.result;
+  if (!isScanningConfigured()) return { ok: false, message: "Malware scanning is not configured. Set VIRUSTOTAL_API_KEY, then retry the scan." };
+  if (!isSupabaseConfigured()) return { ok: true, message: "Document scan retried in development mode." };
+
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, message: "Document scanning requires Supabase admin configuration." };
+  const { data: document, error } = await admin
+    .from("matter_documents")
+    .select("id,matter_id,storage_path,mime_type,display_filename,source_type")
+    .eq("id", parsed.data.documentId)
+    .eq("matter_id", parsed.data.matterId)
+    .maybeSingle();
+  if (error || !document) return { ok: false, message: "We could not find this document." };
+  if (document.source_type !== "uploaded" || !document.storage_path) return { ok: false, message: "Only uploaded files can be malware scanned." };
+
+  const { data: fileBlob, error: downloadError } = await admin.storage.from(matterDocumentBucket).download(String(document.storage_path));
+  if (downloadError || !fileBlob) {
+    await admin.from("matter_documents").update({ status: "failed", scan_status: "scan_failed" }).eq("id", parsed.data.documentId);
+    revalidateMatter(parsed.data.matterId);
+    return { ok: false, message: "The stored file could not be read for scanning." };
+  }
+
+  const outcome = await scanFileForMalware({
+    bytes: await fileBlob.arrayBuffer(),
+    filename: typeof document.display_filename === "string" ? document.display_filename : "document",
+    mimeType: typeof document.mime_type === "string" ? document.mime_type : "application/octet-stream",
+  });
+  await admin.from("matter_documents").update({ status: statusForScanOutcome(outcome), scan_status: outcome }).eq("id", parsed.data.documentId);
+  if (outcome === "flagged") {
+    await logActivity(parsed.data.matterId, permission.profile.id, "document_flagged", "matter_document", parsed.data.documentId, "Uploaded file was flagged by malware scanning and quarantined.", { scan_status: outcome });
+  }
+  revalidateMatter(parsed.data.matterId);
+  if (outcome === "pending") return { ok: true, message: "Scan submitted. The document is still pending." };
+  if (outcome === "scan_failed") return { ok: false, message: "The scan failed. Try again or check the scanning service." };
+  return { ok: true, message: outcome === "clean" ? "Document scan passed." : "Document was flagged and quarantined." };
+}
+
+export async function submitRetryDocumentScanAction(formData: FormData) {
+  await submitWithActionFeedback(retryDocumentScanAction, formData);
 }
 
 export async function createExternalDocumentLinkAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -255,7 +357,7 @@ export async function createExternalDocumentLinkAction(formData: FormData): Prom
 }
 
 export async function submitCreateExternalDocumentLinkAction(formData: FormData) {
-  await createExternalDocumentLinkAction(formData);
+  await submitWithActionFeedback(createExternalDocumentLinkAction, formData);
 }
 
 export async function createPackageAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -284,7 +386,7 @@ export async function createPackageAction(formData: FormData): Promise<DocumentP
 }
 
 export async function submitCreatePackageAction(formData: FormData) {
-  await createPackageAction(formData);
+  await submitWithActionFeedback(createPackageAction, formData);
 }
 
 export async function savePackageRecipientAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -292,12 +394,47 @@ export async function savePackageRecipientAction(formData: FormData): Promise<Do
   if (!parsed.ok) return parsed.result;
   const permission = await requireRole("edit");
   if (!permission.ok) return permission.result;
-  const verificationStatus = parsed.data.verifyEmail
-    ? "verified"
-    : resetVerificationOnEmailChange(parsed.data.previousEmailAddress || null, parsed.data.emailAddress || null, "unverified");
   if (!isSupabaseConfigured()) return { ok: true, message: parsed.data.verifyEmail ? "Recipient email verified in development mode." : "Recipient saved in development mode." };
   const supabase = await createClient();
-  const { error } = await supabase.from("outbound_package_recipients").insert({
+
+  const { data: existingRecipient, error: existingRecipientError } = parsed.data.recipientId
+    ? await supabase
+        .from("outbound_package_recipients")
+        .select("id,email_address,verification_status,verified_by,verified_at")
+        .eq("id", parsed.data.recipientId)
+        .eq("package_id", parsed.data.packageId)
+        .maybeSingle()
+    : await supabase
+        .from("outbound_package_recipients")
+        .select("id,email_address,verification_status,verified_by,verified_at")
+        .eq("package_id", parsed.data.packageId)
+        .eq("is_primary", true)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+  if (existingRecipientError) return { ok: false, message: "We could not load this recipient." };
+  if (parsed.data.recipientId && !existingRecipient) return { ok: false, message: "We could not find this recipient." };
+  const effectiveRecipientId = typeof existingRecipient?.id === "string" ? existingRecipient.id : parsed.data.recipientId;
+
+  const previousEmailAddress = typeof existingRecipient?.email_address === "string"
+    ? existingRecipient.email_address
+    : parsed.data.previousEmailAddress || null;
+  const currentVerificationStatus = String(existingRecipient?.verification_status ?? "unverified") as OutboundPackage["recipients"][number]["verificationStatus"];
+  const verificationStatus = parsed.data.verifyEmail
+    ? "verified"
+    : resetVerificationOnEmailChange(previousEmailAddress, parsed.data.emailAddress || null, currentVerificationStatus);
+  const verificationPreserved = Boolean(existingRecipient) && verificationStatus === currentVerificationStatus;
+  const verifiedBy = parsed.data.verifyEmail
+    ? permission.profile.id
+    : verificationPreserved && typeof existingRecipient?.verified_by === "string"
+      ? existingRecipient.verified_by
+      : null;
+  const verifiedAt = parsed.data.verifyEmail
+    ? new Date().toISOString()
+    : verificationPreserved && typeof existingRecipient?.verified_at === "string"
+      ? existingRecipient.verified_at
+      : null;
+  const values = {
     package_id: parsed.data.packageId,
     recipient_name_snapshot: parsed.data.recipientName,
     organization_name_snapshot: parsed.data.organizationName || null,
@@ -306,18 +443,29 @@ export async function savePackageRecipientAction(formData: FormData): Promise<Do
     recipient_role: parsed.data.recipientRole,
     relationship_to_matter: parsed.data.relationshipToMatter,
     verification_status: verificationStatus,
-    verified_by: parsed.data.verifyEmail ? permission.profile.id : null,
-    verified_at: parsed.data.verifyEmail ? new Date().toISOString() : null,
+    verified_by: verifiedBy,
+    verified_at: verifiedAt,
     verification_note: parsed.data.verificationNote || null,
     is_primary: true,
-  });
+  };
+
+  const { error: primaryRecipientError } = await supabase
+    .from("outbound_package_recipients")
+    .update({ is_primary: false })
+    .eq("package_id", parsed.data.packageId)
+    .neq("id", effectiveRecipientId || "00000000-0000-0000-0000-000000000000");
+  if (primaryRecipientError) return { ok: false, message: "We could not update the primary recipient." };
+
+  const { error } = effectiveRecipientId
+    ? await supabase.from("outbound_package_recipients").update(values).eq("id", effectiveRecipientId).eq("package_id", parsed.data.packageId)
+    : await supabase.from("outbound_package_recipients").insert(values);
   if (error) return { ok: false, message: "We could not save the recipient." };
-  revalidatePath("/packages");
+  await revalidatePackageWorkspace(parsed.data.packageId);
   return { ok: true, message: "Recipient saved." };
 }
 
 export async function submitSavePackageRecipientAction(formData: FormData) {
-  await savePackageRecipientAction(formData);
+  await submitWithActionFeedback(savePackageRecipientAction, formData);
 }
 
 export async function submitPackageForReviewAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -334,16 +482,16 @@ export async function submitPackageForReviewAction(formData: FormData): Promise<
     submitted_for_review_at: now,
   }).eq("id", parsed.data.packageId);
   if (error) return { ok: false, message: "We could not submit this package for review." };
-  revalidatePath("/packages");
+  await revalidatePackageWorkspace(parsed.data.packageId);
   return { ok: true, message: "Package submitted for review." };
 }
 
 export async function submitPackageForReviewFormAction(formData: FormData) {
-  await submitPackageForReviewAction(formData);
+  await submitWithActionFeedback(submitPackageForReviewAction, formData);
 }
 
 export async function requestPackageChangesAction(formData: FormData): Promise<DocumentPackageActionResult> {
-  const parsed = parseForm(reviewSchema, formData);
+  const parsed = parseForm(requestChangesSchema, formData);
   if (!parsed.ok) return parsed.result;
   const permission = await requireRole("edit");
   if (!permission.ok) return permission.result;
@@ -358,12 +506,8 @@ export async function requestPackageChangesAction(formData: FormData): Promise<D
   });
   const { error } = await supabase.from("outbound_packages").update({ status: "changes_requested", approved_by: null, approved_at: null }).eq("id", parsed.data.packageId);
   if (error) return { ok: false, message: "We could not request changes." };
-  revalidatePath("/packages");
+  await revalidatePackageWorkspace(parsed.data.packageId);
   return { ok: true, message: "Changes requested." };
-}
-
-export async function submitRequestPackageChangesAction(formData: FormData) {
-  await requestPackageChangesAction(formData);
 }
 
 export async function approvePackageForSendAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -380,7 +524,7 @@ export async function approvePackageForSendAction(formData: FormData): Promise<D
   if (blockers.length > 0) {
     const fallbackStatus = approvalPackage.status === "approved_for_send" ? "validation_needed" : approvalPackage.status;
     await supabase.from("outbound_packages").update({ status: fallbackStatus, approved_by: null, approved_at: null }).eq("id", parsed.data.packageId);
-    revalidatePath("/packages");
+    await revalidatePackageWorkspace(parsed.data.packageId);
     return { ok: false, message: `Package cannot be approved yet. ${blockers[0]}` };
   }
   await supabase.from("outbound_package_reviews").insert({
@@ -396,12 +540,12 @@ export async function approvePackageForSendAction(formData: FormData): Promise<D
     approved_at: now,
   }).eq("id", parsed.data.packageId);
   if (error) return { ok: false, message: "We could not approve this package." };
-  revalidatePath("/packages");
+  await revalidatePackageWorkspace(parsed.data.packageId);
   return { ok: true, message: "Package approved for the later send workflow." };
 }
 
 export async function submitApprovePackageForSendAction(formData: FormData) {
-  await approvePackageForSendAction(formData);
+  await submitWithActionFeedback(approvePackageForSendAction, formData);
 }
 
 export async function approveTemplateVersionAction(formData: FormData): Promise<DocumentPackageActionResult> {
@@ -422,7 +566,7 @@ export async function approveTemplateVersionAction(formData: FormData): Promise<
 }
 
 export async function submitApproveTemplateVersionAction(formData: FormData) {
-  await approveTemplateVersionAction(formData);
+  await submitWithActionFeedback(approveTemplateVersionAction, formData);
 }
 
 async function logActivity(matterId: string, actorId: string, actionType: string, entityType: string, entityId: string, description: string, newValue: Record<string, unknown> | null) {
@@ -444,10 +588,19 @@ function revalidateMatter(matterId: string) {
   revalidatePath("/matters");
 }
 
-async function loadPackageApprovalFacts(packageId: string): Promise<Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "validations"> | null> {
+async function revalidatePackageWorkspace(packageId: string) {
+  revalidatePath("/packages");
+  if (!isSupabaseConfigured()) return;
+  const supabase = await createClient();
+  const { data } = await supabase.from("outbound_packages").select("matter_id").eq("id", packageId).maybeSingle();
+  const matterId = data?.matter_id ? String(data.matter_id) : null;
+  if (matterId) revalidateMatter(matterId);
+}
+
+async function loadPackageApprovalFacts(packageId: string): Promise<Pick<OutboundPackage, "coverDocumentId" | "documents" | "recipients" | "reviews" | "status" | "templateVersionId" | "templateVersionStatus" | "validations"> | null> {
   const supabase = await createClient();
   const [{ data: pkg }, { data: recipients }, { data: packageDocuments }, { data: validations }, { data: reviews }] = await Promise.all([
-    supabase.from("outbound_packages").select("status,cover_document_id").eq("id", packageId).maybeSingle(),
+    supabase.from("outbound_packages").select("status,cover_document_id,template_version_id").eq("id", packageId).maybeSingle(),
     supabase.from("outbound_package_recipients").select("id,recipient_name_snapshot,organization_name_snapshot,email_address,email_source,recipient_role,relationship_to_matter,verification_status,verified_at,verification_note,is_primary").eq("package_id", packageId),
     supabase.from("outbound_package_documents").select("id,document_id,document_version_number_snapshot,display_filename_snapshot,document_type_snapshot,sort_order,is_required").eq("package_id", packageId),
     supabase.from("outbound_package_validations").select("id,validation_key,status,severity,title,description,override_reason,resolved_at").eq("package_id", packageId),
@@ -455,6 +608,10 @@ async function loadPackageApprovalFacts(packageId: string): Promise<Pick<Outboun
   ]);
 
   if (!pkg) return null;
+  const templateVersionId = typeof pkg.template_version_id === "string" ? pkg.template_version_id : null;
+  const { data: templateVersion } = templateVersionId
+    ? await supabase.from("document_template_versions").select("status").eq("id", templateVersionId).maybeSingle()
+    : { data: null };
   const documentIds = ((packageDocuments ?? []) as Array<{ document_id: string }>).map((document) => document.document_id);
   const { data: matterDocuments } = documentIds.length > 0
     ? await supabase.from("matter_documents").select("id,status,scan_status,visibility,title").in("id", documentIds)
@@ -464,6 +621,8 @@ async function loadPackageApprovalFacts(packageId: string): Promise<Pick<Outboun
   return {
     status: String(pkg.status) as OutboundPackage["status"],
     coverDocumentId: pkg.cover_document_id ? String(pkg.cover_document_id) : null,
+    templateVersionId,
+    templateVersionStatus: typeof templateVersion?.status === "string" ? templateVersion.status as OutboundPackage["templateVersionStatus"] : null,
     recipients: ((recipients ?? []) as Array<Record<string, unknown>>).map((recipient) => ({
       id: String(recipient.id),
       recipientNameSnapshot: String(recipient.recipient_name_snapshot),

@@ -44,6 +44,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
   const currentQueryString = createMattersQueryString(result.query);
   const canManageSharedViews = session.profile.role === "admin" || session.profile.role === "partner";
   const emptyState = getEmptyState(Boolean(result.query.q), activeFilterCount);
+  const hidingClosedOrArchived = !result.query.filters.closed && !result.query.filters.archived && !result.query.filters.archivedOnly;
 
   return (
     <div className="min-w-0 space-y-6">
@@ -59,6 +60,15 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         subtitle={`Find, review, and manage active recovery matters. ${result.totalCount} matter${result.totalCount === 1 ? "" : "s"}.`}
         title="Matters"
       />
+
+      {hidingClosedOrArchived ? (
+        <p className="rounded-lg border border-border bg-secondary/60 px-3 py-2 text-sm text-muted-foreground">
+          Closed and archived matters are hidden.{" "}
+          <Link className="font-medium text-foreground underline-offset-2 hover:underline" href={`/matters?${createMattersQueryString(result.query, { filters: { closed: true, archived: true } })}`}>
+            Show all matters
+          </Link>
+        </p>
+      ) : null}
 
       <MattersWorkspaceControls
         canManageSharedViews={canManageSharedViews}

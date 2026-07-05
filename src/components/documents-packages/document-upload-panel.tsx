@@ -123,7 +123,7 @@ export function DocumentUploadPanel({ matterId, evidence }: DocumentUploadPanelP
         </label>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground" role="status">New files remain marked not scanned until a real scanning service updates them.</p>
+        <p className="text-sm text-muted-foreground" role="status">Uploads are saved first, then malware scanning runs separately. Pending scans can be retried from the document list.</p>
         <Button disabled={!hasFiles} type="submit">Upload documents</Button>
       </div>
     </form>

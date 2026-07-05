@@ -91,7 +91,9 @@ export type TriageMatterSnapshot = {
   nextAction: string | null;
   nextActionDueDate: string | null;
   assignedFirmUser: string;
+  assignedAttorneyId: string | null;
   assignedAttorneyName: string | null;
+  assignedStaffId: string | null;
   assignedStaffName: string | null;
   assignedAdjusterName: string | null;
   daysSinceLastSubstantiveActivity: number | null;
@@ -166,7 +168,9 @@ export function createSnapshotFromListItem(item: MatterListItem): TriageMatterSn
     nextAction: item.nextAction,
     nextActionDueDate: item.nextActionDueDate,
     assignedFirmUser: item.assignedFirmUser,
+    assignedAttorneyId: item.assignedAttorneyId,
     assignedAttorneyName: item.assignedAttorneyName,
+    assignedStaffId: item.assignedStaffId,
     assignedStaffName: item.assignedStaffName,
     assignedAdjusterName: item.assignedAdjusterName,
     daysSinceLastSubstantiveActivity: item.daysSinceLastSubstantiveActivity,

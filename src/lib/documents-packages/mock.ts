@@ -442,6 +442,7 @@ function createPackage(input: {
     subjectLine: `Demand for reimbursement - ${matter.carrierClaimNumber ?? "claim pending"}`,
     coverDocumentId: documents.find((document) => document.documentTypeSnapshot === "demand_letter")?.documentId ?? null,
     templateVersionId: "template-auto-demand-v2",
+    templateVersionStatus: "approved",
     amountDemanded: matter.amountSought,
     responseDeadline: "2026-07-24",
     paymentInstructions: input.status === "validation_needed" ? "" : "Payment instructions will be confirmed before sending.",

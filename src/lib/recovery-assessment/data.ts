@@ -2,7 +2,7 @@ import type { Profile } from "@/lib/data/profiles";
 import { loadMatterDetail } from "@/lib/matters-workspace/data";
 import type { MatterDetail, MatterType } from "@/lib/matters-workspace/types";
 import { centsToMoney, moneyToCents, calculateRecoveryAssessment } from "@/lib/recovery-assessment/calculation";
-import { attorneyConclusionLabels, initialGeneralSubrogationModel, recommendationLabels } from "@/lib/recovery-assessment/model";
+import { attorneyConclusionLabels, initialGeneralSubrogationModel, recommendationLabels, validateRecommendationBands } from "@/lib/recovery-assessment/model";
 import type {
   AssessmentFinancialInput,
   AssessmentResponse,
@@ -11,6 +11,7 @@ import type {
   RecoveryAssessmentFactor,
   RecoveryAssessmentFactorOption,
   RecoveryAssessmentModel,
+  RecommendationBand,
 } from "@/lib/recovery-assessment/types";
 import { createAssessmentSnapshot } from "@/lib/recovery-assessment/types";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -113,7 +114,7 @@ export type AssessmentSummary = {
   draft: RecoveryAssessment | null;
 };
 
-export async function loadAssessmentModelForMatter(matterType: MatterType): Promise<RecoveryAssessmentModel> {
+export async function loadAssessmentModelForMatter(matterType: MatterType, options: { includeInactiveFactors?: boolean } = {}): Promise<RecoveryAssessmentModel> {
   if (!isSupabaseConfigured()) return initialGeneralSubrogationModel;
 
   const supabase = await createClient();
@@ -129,8 +130,11 @@ export async function loadAssessmentModelForMatter(matterType: MatterType): Prom
   const modelRow = ((modelRows ?? []) as unknown as ModelRow[])[0];
   if (!modelRow) return initialGeneralSubrogationModel;
 
+  let factorQuery = supabase.from("recovery_assessment_factors").select("*").eq("assessment_model_id", modelRow.id).order("display_order");
+  if (!options.includeInactiveFactors) factorQuery = factorQuery.eq("is_active", true);
+
   const [{ data: factorRows }, { data: optionRows }] = await Promise.all([
-    supabase.from("recovery_assessment_factors").select("*").eq("assessment_model_id", modelRow.id).eq("is_active", true).order("display_order"),
+    factorQuery,
     supabase.from("recovery_assessment_factor_options").select("*").order("display_order"),
   ]);
   return mapModel(modelRow, (factorRows ?? []) as unknown as FactorRow[], (optionRows ?? []) as unknown as OptionRow[]);
@@ -138,6 +142,7 @@ export async function loadAssessmentModelForMatter(matterType: MatterType): Prom
 
 export async function loadMatterAssessmentBundle(matter: MatterDetail): Promise<MatterAssessmentBundle> {
   const model = await loadAssessmentModelForMatter(matter.matterType);
+  const historicalModel = await loadAssessmentModelForMatter(matter.matterType, { includeInactiveFactors: true });
 
   if (!isSupabaseConfigured()) {
     const assessments = buildDevelopmentAssessments(matter, model);
@@ -150,13 +155,14 @@ export async function loadMatterAssessmentBundle(matter: MatterDetail): Promise<
   }
 
   const supabase = await createClient();
-  const [{ data: assessmentRows }, { data: responseRows }, { data: overrideRows }] = await Promise.all([
-    supabase.from("recovery_assessments").select("*").eq("matter_id", matter.id).order("created_at", { ascending: false }),
-    supabase.from("recovery_assessment_responses").select("*"),
-    supabase.from("recovery_assessment_overrides").select("assessment_id,reason"),
+  const { data: assessmentRows } = await supabase.from("recovery_assessments").select("*").eq("matter_id", matter.id).order("created_at", { ascending: false });
+  const assessmentIds = ((assessmentRows ?? []) as unknown as AssessmentRow[]).map((row) => row.id);
+  const [{ data: responseRows }, { data: overrideRows }] = await Promise.all([
+    assessmentIds.length > 0 ? supabase.from("recovery_assessment_responses").select("*").in("assessment_id", assessmentIds) : { data: [] },
+    assessmentIds.length > 0 ? supabase.from("recovery_assessment_overrides").select("assessment_id,reason").in("assessment_id", assessmentIds) : { data: [] },
   ]);
   const assessments = ((assessmentRows ?? []) as unknown as AssessmentRow[]).map((row) =>
-    mapAssessment(row, model, (responseRows ?? []) as unknown as ResponseRow[], (overrideRows ?? []) as unknown as OverrideRow[])
+    mapAssessment(row, historicalModel, (responseRows ?? []) as unknown as ResponseRow[], (overrideRows ?? []) as unknown as OverrideRow[])
   );
 
   return {
@@ -182,14 +188,46 @@ export async function loadAssessmentSummariesForMatters(matters: MatterDetail[])
 }
 
 export async function loadAssessmentSummariesForMatterIds(matterIds: string[], profile: Profile): Promise<AssessmentSummary[]> {
-  const matters = await Promise.all(matterIds.map(async (matterId) => {
-    try {
-      return await loadMatterDetail(matterId, profile);
-    } catch {
-      return null;
-    }
-  }));
-  return loadAssessmentSummariesForMatters(matters.filter((matter): matter is MatterDetail => Boolean(matter)));
+  if (!isSupabaseConfigured()) {
+    const matters = await Promise.all(matterIds.map(async (matterId) => {
+      try {
+        return await loadMatterDetail(matterId, profile);
+      } catch {
+        return null;
+      }
+    }));
+    return loadAssessmentSummariesForMatters(matters.filter((matter): matter is MatterDetail => Boolean(matter)));
+  }
+
+  if (matterIds.length === 0) return [];
+  const supabase = await createClient();
+  const [{ data: matterRows }, { data: assessmentRows }] = await Promise.all([
+    supabase.from("matters").select("id,matter_name,assigned_attorney_id").in("id", matterIds),
+    supabase.from("recovery_assessments").select("*").in("matter_id", matterIds).in("status", ["finalized", "draft"]).order("created_at", { ascending: false }),
+  ]);
+  const assessmentIds = ((assessmentRows ?? []) as unknown as AssessmentRow[]).map((row) => row.id);
+  const [{ data: overrideRows }, { data: profileRows }] = await Promise.all([
+    assessmentIds.length > 0
+      ? supabase.from("recovery_assessment_overrides").select("assessment_id,reason").in("assessment_id", assessmentIds)
+      : { data: [] },
+    supabase.from("profiles").select("id,full_name"),
+  ]);
+  const profileNames = new Map(((profileRows ?? []) as Array<{ id: string; full_name: string }>).map((row) => [row.id, row.full_name]));
+  const assessmentsByMatter = groupBy((assessmentRows ?? []) as unknown as AssessmentRow[], (row) => row.matter_id);
+  const overrides = (overrideRows ?? []) as unknown as OverrideRow[];
+
+  return ((matterRows ?? []) as Array<{ id: string; matter_name: string; assigned_attorney_id: string | null }>).map((matter) => {
+    const assessments = assessmentsByMatter.get(matter.id) ?? [];
+    const current = assessments.find((assessment) => assessment.status === "finalized");
+    const draft = assessments.find((assessment) => assessment.status === "draft");
+    return {
+      matterId: matter.id,
+      matterName: matter.matter_name,
+      assignedAttorneyName: matter.assigned_attorney_id ? profileNames.get(matter.assigned_attorney_id) ?? null : null,
+      current: current ? mapAssessmentSummaryRow(current, overrides, profileNames) : null,
+      draft: draft ? mapAssessmentSummaryRow(draft, overrides, profileNames) : null,
+    };
+  });
 }
 
 export async function loadMatterForAssessment(matterId: string, profile: Profile) {
@@ -228,7 +266,7 @@ function mapModel(modelRow: ModelRow, factorRows: FactorRow[], optionRows: Optio
     effectiveFrom: modelRow.effective_from,
     effectiveTo: modelRow.effective_to,
     notice: "These initial weights are operational defaults and should be reviewed against the firm's actual historical results.",
-    recommendationBands: initialGeneralSubrogationModel.recommendationBands,
+    recommendationBands: parseRecommendationBands(modelRow.recommendation_bands),
     factors: factorRows.map((row) => ({
       id: row.id,
       factorKey: row.factor_key,
@@ -243,6 +281,31 @@ function mapModel(modelRow: ModelRow, factorRows: FactorRow[], optionRows: Optio
       options: (optionsByFactor.get(row.id) ?? []).map(mapOption),
     })),
   };
+}
+
+function parseRecommendationBands(value: Json): RecommendationBand[] {
+  if (!Array.isArray(value)) return initialGeneralSubrogationModel.recommendationBands;
+  const parsed = value
+    .map((band) => {
+      if (!band || typeof band !== "object") return null;
+      const item = band as Record<string, unknown>;
+      const recommendation = typeof item.recommendation === "string" && item.recommendation in recommendationLabels
+        ? (item.recommendation as RecommendationBand["recommendation"])
+        : null;
+      const minScore = numberFrom((item.minScore ?? item.min_score) as string | number | null | undefined);
+      const maxScore = numberFrom((item.maxScore ?? item.max_score) as string | number | null | undefined);
+      if (!recommendation) return null;
+      return {
+        minScore,
+        maxScore,
+        recommendation,
+        label: typeof item.label === "string" && item.label ? item.label : recommendationLabels[recommendation],
+        description: typeof item.description === "string" ? item.description : "",
+      } satisfies RecommendationBand;
+    })
+    .filter((band): band is RecommendationBand => Boolean(band));
+
+  return validateRecommendationBands(parsed) ? parsed : initialGeneralSubrogationModel.recommendationBands;
 }
 
 function mapOption(row: OptionRow): RecoveryAssessmentFactorOption {
@@ -312,6 +375,49 @@ function mapAssessment(row: AssessmentRow, model: RecoveryAssessmentModel, respo
     amountExplanation: row.amount_explanation ?? "",
     completedByName: row.completed_by,
     finalizedByName: row.finalized_by,
+    finalizedAt: row.finalized_at,
+    supersededAt: row.superseded_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    overrideReason: overrideRows.find((override) => override.assessment_id === row.id)?.reason ?? null,
+  };
+}
+
+function mapAssessmentSummaryRow(row: AssessmentRow, overrideRows: OverrideRow[], profileNames: Map<string, string>): RecoveryAssessment {
+  const calculatedRecommendation = row.calculated_recommendation;
+  return {
+    id: row.id,
+    matterId: row.matter_id,
+    assessmentModelId: row.assessment_model_id,
+    assessmentModelVersion: row.assessment_model_version,
+    status: row.status,
+    potentialRecoverableAmount: numberFrom(row.potential_recoverable_amount),
+    estimatedRecoveryProbability: numberFrom(row.estimated_recovery_probability),
+    estimatedLegalCosts: numberFrom(row.estimated_legal_costs),
+    estimatedThirdPartyReductions: numberFrom(row.estimated_third_party_reductions),
+    amountExplanation: row.amount_explanation ?? "",
+    viabilityScore: numberFrom(row.viability_score),
+    expectedGrossValue: numberFrom(row.expected_gross_value),
+    expectedNetValue: numberFrom(row.expected_net_value),
+    dataCompletenessPercentage: numberFrom(row.data_completeness_percentage),
+    dataCompletenessLabel: `${Math.round(numberFrom(row.data_completeness_percentage))}% complete`,
+    calculatedRecommendation,
+    calculatedRecommendationLabel: recommendationLabels[calculatedRecommendation],
+    factorResults: [],
+    missingRequiredFactorCount: 0,
+    formula: {
+      scoreFormula: "Stored assessment summary.",
+      expectedGrossValueFormula: "Potential Recoverable Amount x Estimated Recovery Probability = Expected Gross Value.",
+      expectedNetValueFormula: "Expected Gross Value - Estimated Legal Costs - Estimated Third-Party Reductions = Expected Net Value.",
+      completenessFormula: "Stored assessment completeness.",
+    },
+    warnings: [],
+    attorneyConclusion: row.attorney_conclusion,
+    attorneyConclusionLabel: row.attorney_conclusion ? attorneyConclusionLabels[row.attorney_conclusion] : null,
+    assessmentSummary: row.assessment_summary,
+    assumptions: row.assumptions,
+    completedByName: row.completed_by ? profileNames.get(row.completed_by) ?? null : null,
+    finalizedByName: row.finalized_by ? profileNames.get(row.finalized_by) ?? null : null,
     finalizedAt: row.finalized_at,
     supersededAt: row.superseded_at,
     createdAt: row.created_at,

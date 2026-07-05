@@ -13,8 +13,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   submitApprovePackageForSendAction,
   submitPackageForReviewFormAction,
-  submitRequestPackageChangesAction,
 } from "@/lib/documents-packages/actions";
+import { RequestPackageChangesDialog } from "@/components/documents-packages/request-package-changes-dialog";
 import {
   emailSourceLabels,
   packageSortLabels,
@@ -529,11 +529,7 @@ function PackageSecondaryActions({ outboundPackage }: { outboundPackage: Outboun
       ) : null}
       {canReview ? (
         <>
-          <form action={submitRequestPackageChangesAction}>
-            <input name="packageId" type="hidden" value={outboundPackage.id} />
-            <input name="comments" type="hidden" value="Changes requested from package queue." />
-            <Button size="sm" type="submit" variant="outline">Request Changes</Button>
-          </form>
+          <RequestPackageChangesDialog packageId={outboundPackage.id} />
           <form action={submitApprovePackageForSendAction}>
             <input name="packageId" type="hidden" value={outboundPackage.id} />
             <input name="comments" type="hidden" value="Approved for later send workflow." />

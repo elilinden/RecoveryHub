@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
+import { ActionFeedbackBanner } from "@/components/app/action-feedback-banner";
 import { AppShellBody } from "@/components/app/app-shell-body";
+import { ACTION_FEEDBACK_COOKIE, parseActionFeedbackCookie } from "@/lib/action-feedback/shared";
 import { SIDEBAR_COLLAPSE_COOKIE } from "@/lib/app-shell/sidebar-cookie";
 import type { Profile } from "@/lib/data/profiles";
 
@@ -14,6 +16,7 @@ type AppShellProps = {
 export async function AppShell({ children, profile, configurationNotice }: AppShellProps) {
   const cookieStore = await cookies();
   const defaultCollapsed = cookieStore.get(SIDEBAR_COLLAPSE_COOKIE)?.value === "1";
+  const feedback = parseActionFeedbackCookie(cookieStore.get(ACTION_FEEDBACK_COOKIE)?.value);
 
   return (
     <div className="min-h-screen overflow-x-clip bg-background">
@@ -23,7 +26,12 @@ export async function AppShell({ children, profile, configurationNotice }: AppSh
       >
         Skip to content
       </a>
-      <AppShellBody configurationNotice={configurationNotice} defaultCollapsed={defaultCollapsed} profile={profile}>
+      <AppShellBody
+        actionFeedback={feedback ? <ActionFeedbackBanner feedback={feedback} /> : null}
+        configurationNotice={configurationNotice}
+        defaultCollapsed={defaultCollapsed}
+        profile={profile}
+      >
         {children}
       </AppShellBody>
     </div>

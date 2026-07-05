@@ -86,7 +86,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
             {active.slug === "profile" ? <ProfileSettingsForm profile={profile} /> : null}
             {active.slug === "workflow" ? <TriageSettingsForm result={triageSettings} /> : null}
-            {active.slug === "assessment" ? <RecoveryAssessmentSettings profile={profile} /> : null}
+            {active.slug === "assessment" ? <RecoveryAssessmentSettings /> : null}
             {active.slug === "documents" ? <DocumentTemplateSettings profile={profile} templates={documentTemplates} /> : null}
             {active.slug === "users" && isAdmin ? <UserManagementSettings currentAdminId={profile.id} users={managedUsers} /> : null}
             {active.comingSoon ? (

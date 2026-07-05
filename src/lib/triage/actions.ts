@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { submitWithActionFeedback } from "@/lib/action-feedback/server";
 import { getCurrentProfile, type Profile } from "@/lib/data/profiles";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { loadMatterDetail } from "@/lib/matters-workspace/data";
@@ -97,7 +98,7 @@ export async function updateTriageSettingsAction(formData: FormData): Promise<Tr
 }
 
 export async function submitUpdateTriageSettingsAction(formData: FormData) {
-  await updateTriageSettingsAction(formData);
+  await submitWithActionFeedback(updateTriageSettingsAction, formData);
 }
 
 export async function refreshDashboardTriageAction(formData: FormData): Promise<TriageActionResult> {
@@ -119,7 +120,7 @@ export async function refreshDashboardTriageAction(formData: FormData): Promise<
 }
 
 export async function submitRefreshDashboardTriageAction(formData: FormData) {
-  await refreshDashboardTriageAction(formData);
+  await submitWithActionFeedback(refreshDashboardTriageAction, formData);
 }
 
 export async function recheckMatterTriageAction(formData: FormData): Promise<TriageActionResult> {
@@ -137,7 +138,7 @@ export async function recheckMatterTriageAction(formData: FormData): Promise<Tri
 }
 
 export async function submitRecheckMatterTriageAction(formData: FormData) {
-  await recheckMatterTriageAction(formData);
+  await submitWithActionFeedback(recheckMatterTriageAction, formData);
 }
 
 export async function snoozeTriageFlagAction(formData: FormData): Promise<TriageActionResult> {
@@ -150,7 +151,7 @@ export async function snoozeTriageFlagAction(formData: FormData): Promise<Triage
 }
 
 export async function submitSnoozeTriageFlagAction(formData: FormData) {
-  await snoozeTriageFlagAction(formData);
+  await submitWithActionFeedback(snoozeTriageFlagAction, formData);
 }
 
 export async function overrideTriageFlagAction(formData: FormData): Promise<TriageActionResult> {
@@ -167,5 +168,5 @@ export async function overrideTriageFlagAction(formData: FormData): Promise<Tria
 }
 
 export async function submitOverrideTriageFlagAction(formData: FormData) {
-  await overrideTriageFlagAction(formData);
+  await submitWithActionFeedback(overrideTriageFlagAction, formData);
 }

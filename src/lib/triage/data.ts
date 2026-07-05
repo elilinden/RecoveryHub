@@ -90,10 +90,15 @@ export async function updateTriageSettings(profile: Profile, settings: Partial<T
 
   if (rows.length === 0) return { ok: true as const, message: "No triage settings changed." };
   const { error } = await supabase.from("triage_settings").upsert(rows, { onConflict: "setting_key" });
-  if (error) return { ok: false as const, message: "We could not update triage settings." };
+  if (error) {
+    console.error("updateTriageSettings: upsert failed", { updatedBy: profile.id, error });
+    return { ok: false as const, message: "We could not update triage settings." };
+  }
   revalidatePath("/settings");
   revalidatePath("/dashboard");
-  return { ok: true as const, message: "Triage settings updated." };
+  // The dashboard evaluates every rule fresh from these settings on each load, so this takes
+  // effect immediately for everyone — there is no separate "apply" or cache-refresh step.
+  return { ok: true as const, message: "Triage settings updated. The dashboard and matter flags now reflect these rules." };
 }
 
 export async function loadActiveMatterFlags(matterIds: string[]): Promise<Map<string, TriageFlag[]>> {
@@ -136,6 +141,7 @@ export async function syncMatterFlags(evaluations: TriageEvaluation[], profile: 
   if (!isSupabaseConfigured()) return { ok: true as const, message: "Triage evaluated in development mode.", updatedCount: evaluations.length };
   const supabase = await createClient();
   let updatedCount = 0;
+  let failedCount = 0;
 
   for (const evaluation of evaluations) {
     const { data } = await supabase
@@ -163,20 +169,21 @@ export async function syncMatterFlags(evaluations: TriageEvaluation[], profile: 
         metadata: flag.metadata as Json,
       };
 
-      if (existing?.id) {
-        await supabase.from("matter_flags").update(values).eq("id", existing.id);
+      const { error } = existing?.id
+        ? await supabase.from("matter_flags").update(values).eq("id", existing.id)
+        : await supabase.from("matter_flags").insert({ ...values, detected_at: flag.detectedAt });
+
+      if (error) {
+        console.error("syncMatterFlags: failed to save flag", { matterId: flag.matterId, ruleKey: flag.ruleKey, error });
+        failedCount += 1;
       } else {
-        await supabase.from("matter_flags").insert({
-          ...values,
-          detected_at: flag.detectedAt,
-        });
+        updatedCount += 1;
       }
-      updatedCount += 1;
     }
 
     for (const active of activeRows) {
       if (evaluatedByRule.has(active.ruleKey)) continue;
-      await supabase
+      const { error } = await supabase
         .from("matter_flags")
         .update({
           resolved_at: evaluation.evaluatedAt,
@@ -185,8 +192,22 @@ export async function syncMatterFlags(evaluations: TriageEvaluation[], profile: 
           last_evaluated_at: evaluation.evaluatedAt,
         })
         .eq("id", active.id ?? "");
-      updatedCount += 1;
+
+      if (error) {
+        console.error("syncMatterFlags: failed to resolve stale flag", { matterId: evaluation.matterId, flagId: active.id, error });
+        failedCount += 1;
+      } else {
+        updatedCount += 1;
+      }
     }
+  }
+
+  if (failedCount > 0) {
+    return {
+      ok: false as const,
+      message: `${updatedCount} triage flag${updatedCount === 1 ? "" : "s"} saved, but ${failedCount} failed to update. Try refreshing again.`,
+      updatedCount,
+    };
   }
 
   return { ok: true as const, message: "Triage flags refreshed.", updatedCount };

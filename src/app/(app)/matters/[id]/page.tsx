@@ -12,6 +12,7 @@ import { AddMatterEventForm } from "@/components/matters/add-matter-event-form";
 import { EditCurrentStatusSheet } from "@/components/matters/edit-current-status-sheet";
 import { MatterDetailWorkspace, type MatterWorkTab } from "@/components/matters/matter-detail-workspace";
 import { DateField, MoneyField, SelectField, TextAreaField, TextField } from "@/components/matters/matter-form-fields";
+import { CloseMatterDialog, ReopenMatterDialog } from "@/components/matters/matter-lifecycle-dialogs";
 import { MatterSummaryStrip } from "@/components/matters/matter-summary-strip";
 import { MatterTimeline } from "@/components/matters/matter-timeline";
 import { MatterDocumentsPackagesPanel } from "@/components/documents-packages/matter-documents-packages-panel";
@@ -41,8 +42,6 @@ import { permissionsForRole } from "@/lib/documents-packages/types";
 import type { MatterAssignment, MatterDetail } from "@/lib/matters-workspace/types";
 import {
   submitArchiveMatterAction,
-  submitCloseMatterAction,
-  submitReopenMatterAction,
   submitRestoreMatterAction,
   submitUpdateFinancialsAction,
   submitUpsertDeadlineAction,
@@ -356,6 +355,25 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
                     Save
                   </Button>
                 ) : null}
+                {(item.documentLinks ?? []).length > 0 ? (
+                  <div className="lg:col-span-6">
+                    <p className="text-xs font-medium text-muted-foreground">Linked documents</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(item.documentLinks ?? []).map((document) => (
+                        <a
+                          className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:border-primary hover:text-primary"
+                          href={`/api/documents/${document.documentId}/download`}
+                          key={document.documentId}
+                          rel="noreferrer"
+                          target="_blank"
+                          title={document.displayFilename}
+                        >
+                          {document.title}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </form>
             ))}
             {matter.permissions.canManageEvidence ? (
@@ -501,17 +519,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
           <div className="flex flex-wrap gap-2">
             <MatterMoreActions matter={matter} />
             {matter.stage === "closed" && matter.permissions.canReopen ? (
-              <form action={submitReopenMatterAction} className="flex flex-wrap gap-2">
-                <input name="matterId" type="hidden" value={matter.id} />
-                <input name="reason" type="hidden" value="Reopened for additional recovery work" />
-                <input name="stage" type="hidden" value="investigation" />
-                <input name="nextAction" type="hidden" value="Review reopened matter" />
-                <input name="nextActionDueDate" type="hidden" value={new Date().toISOString().slice(0, 10)} />
-                <input name="responsibleUser" type="hidden" value={matter.assignedAttorneyId ?? matter.assignedStaffId ?? ""} />
-                <Button type="submit" variant="outline">
-                  Reopen Matter
-                </Button>
-              </form>
+              <ReopenMatterDialog defaultResponsibleUser={matter.assignedAttorneyId ?? matter.assignedStaffId ?? ""} matterId={matter.id} />
             ) : null}
             {matter.intakeStatus !== "complete" ? (
               <Button asChild>
@@ -662,15 +670,7 @@ function MatterMoreActions({ matter }: { matter: MatterDetail }) {
         More Actions
       </summary>
       <div className="absolute right-0 z-20 mt-2 grid min-w-44 gap-2 rounded-lg border border-border bg-popover p-2 shadow-md">
-        {matter.stage !== "closed" && matter.permissions.canClose ? (
-          <form action={submitCloseMatterAction}>
-            <input name="matterId" type="hidden" value={matter.id} />
-            <input name="reason" type="hidden" value="Other" />
-            <input name="closingDate" type="hidden" value={new Date().toISOString().slice(0, 10)} />
-            <input name="note" type="hidden" value="Closed from matter detail." />
-            <Button className="w-full justify-start" size="sm" type="submit" variant="ghost">Close Matter</Button>
-          </form>
-        ) : null}
+        {matter.stage !== "closed" && matter.permissions.canClose ? <CloseMatterDialog matterId={matter.id} /> : null}
         {matter.isArchived && matter.permissions.canRestore ? (
           <form action={submitRestoreMatterAction}>
             <input name="matterId" type="hidden" value={matter.id} />

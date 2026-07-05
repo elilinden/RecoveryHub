@@ -193,6 +193,7 @@ export async function saveIntakeDraftAction(input: {
   data: IntakeFormData;
   step: number;
   exit?: boolean;
+  lastKnownAutosavedAt?: string;
 }): Promise<IntakeActionResult> {
   const stepOne = intakeStepOneSchema.safeParse(input.data.stepOne);
 
@@ -250,12 +251,19 @@ export async function saveIntakeDraftAction(input: {
   };
 
   const query = input.matterId
-    ? supabase.from("matters").update(matterValues).eq("id", input.matterId).select("id").single()
+    ? (() => {
+        let updateQuery = supabase.from("matters").update(matterValues).eq("id", input.matterId);
+        if (input.lastKnownAutosavedAt) updateQuery = updateQuery.eq("last_autosaved_at", input.lastKnownAutosavedAt);
+        return updateQuery.select("id").maybeSingle();
+      })()
     : supabase.from("matters").insert(matterValues).select("id").single();
 
   const { data, error } = await query;
 
   if (error || !data) {
+    if (input.matterId && input.lastKnownAutosavedAt) {
+      return { ok: false, message: "This intake draft was changed in another tab. Refresh before saving so you do not overwrite newer work." };
+    }
     return { ok: false, message: "We could not save this intake draft." };
   }
 
@@ -667,17 +675,17 @@ export async function addCarrierAction(input: {
   };
 }
 
-export async function getIntakeDraft(matterId: string): Promise<IntakeFormData | null> {
+export async function getIntakeDraft(matterId: string): Promise<{ data: IntakeFormData; lastAutosavedAt: string | null } | null> {
   if (!isSupabaseConfigured()) {
     return null;
   }
 
   const supabase = await createClient();
-  const { data } = await supabase.from("matters").select("matter_specific_data").eq("id", matterId).maybeSingle();
+  const { data } = await supabase.from("matters").select("matter_specific_data,last_autosaved_at").eq("id", matterId).maybeSingle();
   const raw = data?.matter_specific_data as { intake_draft?: unknown } | null | undefined;
   const parsed = intakeSchema.safeParse(raw?.intake_draft);
 
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? { data: parsed.data, lastAutosavedAt: data?.last_autosaved_at ? String(data.last_autosaved_at) : null } : null;
 }
 
 export async function cancelIntakeAction(input?: { matterId?: string; mode?: CancelIntakeMode }): Promise<IntakeActionResult> {

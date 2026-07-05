@@ -29,7 +29,9 @@ function snapshot(overrides: Partial<TriageMatterSnapshot> = {}): TriageMatterSn
     nextAction: "Prepare demand",
     nextActionDueDate: "2026-07-08",
     assignedFirmUser: "Eli Linden",
+    assignedAttorneyId: "profile-eli",
     assignedAttorneyName: "Eli Linden",
+    assignedStaffId: null,
     assignedStaffName: null,
     assignedAdjusterName: "Riley Vale",
     daysSinceLastSubstantiveActivity: 5,
@@ -95,7 +97,9 @@ describe("evaluateMatterTriage", () => {
   it("triggers missing assignment, responsible party, insurance, liability, financial, and payment flags", () => {
     const flags = evaluateMatterTriage(snapshot({
       assignedAttorneyName: null,
+      assignedAttorneyId: null,
       assignedStaffName: null,
+      assignedStaffId: null,
       assignedFirmUser: "Unassigned",
       primaryPartyNames: [],
       insuranceStatus: "unknown",

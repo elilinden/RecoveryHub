@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { matterDocumentBucket } from "@/lib/documents-packages/storage";
-import { scanFileForMalware } from "@/lib/documents-packages/scanning";
+import { isScanningConfigured, scanFileForMalware } from "@/lib/documents-packages/scanning";
 import type { DocumentScanStatus, DocumentStatus } from "@/lib/documents-packages/types";
 
 const pendingScanStatuses: DocumentScanStatus[] = ["pending", "scan_failed"];
@@ -19,6 +19,7 @@ type PendingDocumentRow = {
 function statusForScanOutcome(scanOutcome: DocumentScanStatus): DocumentStatus {
   if (scanOutcome === "clean") return "available";
   if (scanOutcome === "flagged") return "quarantined";
+  if (scanOutcome === "scan_failed") return "failed";
   return "processing";
 }
 
@@ -32,22 +33,37 @@ export async function POST(request: NextRequest) {
   if (!secret || provided !== secret) {
     return NextResponse.json({ ok: false, message: "Not authorized." }, { status: 401 });
   }
+  if (!isScanningConfigured()) {
+    return NextResponse.json({ ok: false, message: "Malware scanning is not configured." }, { status: 503 });
+  }
 
   const admin = createAdminClient();
   if (!admin) {
     return NextResponse.json({ ok: false, message: "Supabase admin configuration is required to scan documents." }, { status: 500 });
   }
 
-  const { data, error } = await admin
-    .from("matter_documents")
-    .select("id,matter_id,storage_path,mime_type,display_filename")
-    .in("scan_status", pendingScanStatuses)
-    .eq("source_type", "uploaded")
-    .not("storage_path", "is", null)
-    .limit(batchLimit);
+  const [{ data, error }, { count: totalPendingDocuments, error: countError }] = await Promise.all([
+    admin
+      .from("matter_documents")
+      .select("id,matter_id,storage_path,mime_type,display_filename")
+      .in("scan_status", pendingScanStatuses)
+      .eq("source_type", "uploaded")
+      .not("storage_path", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(batchLimit),
+    admin
+      .from("matter_documents")
+      .select("id", { count: "exact", head: true })
+      .in("scan_status", pendingScanStatuses)
+      .eq("source_type", "uploaded")
+      .not("storage_path", "is", null),
+  ]);
 
   if (error) {
     return NextResponse.json({ ok: false, message: "Could not load pending documents." }, { status: 500 });
+  }
+  if (countError) {
+    console.error("document scan: could not count pending backlog", countError);
   }
 
   const candidates = (data ?? []) as unknown as PendingDocumentRow[];
@@ -93,5 +109,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, candidateCount: candidates.length, scanned, flagged, stillPending });
+  return NextResponse.json({
+    ok: true,
+    candidateCount: candidates.length,
+    totalPendingDocuments: totalPendingDocuments ?? candidates.length,
+    scanned,
+    flagged,
+    stillPending,
+  });
 }

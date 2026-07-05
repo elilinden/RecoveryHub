@@ -8,7 +8,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { submitCreateExternalDocumentLinkAction, submitCreatePackageAction } from "@/lib/documents-packages/actions";
+import { submitCreateExternalDocumentLinkAction, submitCreatePackageAction, submitRetryDocumentScanAction } from "@/lib/documents-packages/actions";
 import {
   documentTypeLabels,
   packageTypeLabels,
@@ -17,6 +17,7 @@ import {
 import type { DocumentPackagePermissions, DocumentTemplate, MatterDocument, OutboundPackage } from "@/lib/documents-packages/types";
 import type { EvidenceItem } from "@/lib/matters-workspace/types";
 import { canPreviewDocument } from "@/lib/documents-packages/storage";
+import { isScanningConfigured } from "@/lib/documents-packages/scanning";
 import { DocumentStatusBadge, PackageStatusBadge, ScanStatusBadge, VerificationBadge, VisibilityBadge } from "@/components/documents-packages/document-package-badges";
 import { DocumentUploadPanel } from "@/components/documents-packages/document-upload-panel";
 
@@ -64,6 +65,7 @@ export function MatterDocumentsPackagesPanel({
             <EmptyState description="Upload or link the first document for this matter." title="No documents have been added" />
           ) : (
             <div className="document-list rounded-lg border border-border bg-card shadow-sm">
+              <ScanNotice documents={documents} scanningConfigured={isScanningConfigured()} />
               <div className="document-list-desktop" role="table" aria-label="Matter documents">
                 <div className="document-list-header document-list-grid" role="row">
                   <div role="columnheader">Document</div>
@@ -208,6 +210,7 @@ function DocumentRow({ document }: { document: MatterDocument }) {
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={`${documentTypeLabels[document.documentType]} · ${sourceTypeLabels[document.sourceType]}`}>
           {documentTypeLabels[document.documentType]} · {sourceTypeLabels[document.sourceType]}
         </p>
+        <EvidenceLinkSummary document={document} />
       </div>
       <div className="document-list-cell min-w-0 text-sm" role="cell">
         <p className="font-medium text-foreground">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</p>
@@ -227,17 +230,45 @@ function DocumentRow({ document }: { document: MatterDocument }) {
 }
 
 function DocumentActions({ document }: { document: MatterDocument }) {
+  const canRetryScan = document.sourceType === "uploaded" && (document.scanStatus === "pending" || document.scanStatus === "scan_failed" || document.status === "processing");
+  const canDownload = document.status === "available" && document.scanStatus !== "flagged" && document.scanStatus !== "pending" && document.scanStatus !== "scan_failed";
   return (
     <div className="flex min-w-0 flex-wrap gap-2">
       <Button asChild disabled={!canPreviewDocument(document)} size="sm" variant="outline">
         <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">Preview</a>
       </Button>
-      <Button asChild disabled={document.status === "quarantined" || document.scanStatus === "flagged"} size="sm" variant="outline">
+      <Button asChild disabled={!canDownload} size="sm" variant="outline">
         <a href={`/api/documents/${document.id}/download`} rel="noreferrer" target="_blank">
           {document.externalUrl ? <ExternalLink aria-hidden="true" className="size-4" /> : null}
           {document.externalUrl ? "Open" : "Download"}
         </a>
       </Button>
+      {canRetryScan ? (
+        <form action={submitRetryDocumentScanAction}>
+          <input name="matterId" type="hidden" value={document.matterId} />
+          <input name="documentId" type="hidden" value={document.id} />
+          <Button size="sm" type="submit" variant="outline">Retry scan</Button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function ScanNotice({ documents, scanningConfigured }: { documents: MatterDocument[]; scanningConfigured: boolean }) {
+  const pendingCount = documents.filter((document) => document.sourceType === "uploaded" && (document.scanStatus === "pending" || document.status === "processing")).length;
+  const failedCount = documents.filter((document) => document.sourceType === "uploaded" && document.scanStatus === "scan_failed").length;
+  if (pendingCount === 0 && failedCount === 0) return null;
+  return (
+    <div className="border-b border-border bg-[var(--warning-muted)] px-4 py-3 text-sm text-foreground">
+      <p className="font-medium">Document scanning needs attention</p>
+      <p className="mt-1 text-muted-foreground">
+        {pendingCount > 0 ? `${pendingCount} document${pendingCount === 1 ? " is" : "s are"} waiting for malware scanning. ` : ""}
+        {failedCount > 0 ? `${failedCount} scan${failedCount === 1 ? " has" : "s have"} failed. ` : ""}
+        Files are not downloadable until scanning passes.{" "}
+        {scanningConfigured
+          ? "Use Retry scan below to check again."
+          : "Malware scanning is not configured for this workspace, so these documents cannot be scanned automatically and will stay pending indefinitely. Ask an administrator to set the VIRUSTOTAL_API_KEY environment variable, then use Retry scan on each document."}
+      </p>
     </div>
   );
 }
@@ -264,10 +295,28 @@ function DocumentCard({ document }: { document: MatterDocument }) {
           <div><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{document.documentDate ? <DateDisplay value={document.documentDate} /> : "Not dated"}</dd></div>
           <div><dt className="text-muted-foreground">Source</dt><dd className="font-medium text-foreground">{sourceTypeLabels[document.sourceType]}</dd></div>
         </dl>
+        <EvidenceLinkSummary document={document} />
         <DocumentActions document={document} />
       </CardContent>
     </Card>
   );
+}
+
+function EvidenceLinkSummary({ document }: { document: MatterDocument }) {
+  if (document.evidenceLinks.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Linked evidence">
+      {document.evidenceLinks.map((link) => (
+        <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground" key={link.evidenceItemId}>
+          {formatEvidenceLabel(link.evidenceType)} · {link.status.replaceAll("_", " ")}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatEvidenceLabel(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function PackageRow({ outboundPackage }: { outboundPackage: OutboundPackage }) {

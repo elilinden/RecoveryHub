@@ -1,13 +1,14 @@
 import type { SummaryMetric } from "@/lib/types";
 import type { Profile } from "@/lib/data/profiles";
-import { loadMatterDetail, loadMattersWorkspace } from "@/lib/matters-workspace/data";
-import type { DeadlineItem, MatterDetail, TaskItem, TimelineItem } from "@/lib/matters-workspace/types";
+import { loadMattersWorkspace } from "@/lib/matters-workspace/data";
+import type { DeadlineItem, EvidenceItem, MatterDetail, MatterEventSource, MatterEventType, MatterListItem, TaskItem, TaskStatus, TimelineItem } from "@/lib/matters-workspace/types";
 import { developmentMatterItems, getDevelopmentMatterDetail } from "@/lib/matters-workspace/mock";
 import { dashboardMatterLinks } from "@/lib/matters-workspace/links";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
 import { compareMatterTriage, evaluateMatterTriage, getPrimaryTriageFlag, isSnoozed } from "@/lib/triage/rules";
 import { loadActiveMatterFlags, loadTriageSettings } from "@/lib/triage/data";
-import { createSnapshotFromDetail, type TriageFlag, type TriageMatterSnapshot } from "@/lib/triage/types";
+import { createSnapshotFromDetail, createSnapshotFromListItem, type TriageFlag, type TriageMatterSnapshot } from "@/lib/triage/types";
 import { loadAssessmentSummariesForMatterIds, type AssessmentSummary } from "@/lib/recovery-assessment/data";
 
 export type DashboardMode = "my" | "firm";
@@ -70,6 +71,13 @@ export type DashboardData = {
 
 const developmentNow = new Date("2026-07-03T12:00:00.000Z");
 
+type DashboardProfileRow = { id: string; full_name: string };
+type DashboardEvidenceRow = { id: string; matter_id: string; evidence_type: string; status: EvidenceItem["status"]; date_requested: string | null; date_received: string | null; notes: string | null; updated_at: string };
+type DashboardDeadlineRow = { id: string; matter_id: string; title: string; deadline_type: string; deadline_date: string; is_verified: boolean; verified_by: string | null; verified_at: string | null; reminder_date: string | null; assigned_to: string | null; notes: string | null };
+type DashboardTaskRow = { id: string; matter_id: string; title: string; description: string | null; assigned_to: string | null; due_date: string | null; priority: TaskItem["priority"]; status: TaskStatus; completed_at: string | null; created_by: string | null };
+type DashboardEventRow = { id: string; matter_id: string; event_type: MatterEventType; occurred_at: string; recorded_by: string | null; source: MatterEventSource; description: string; struck_through_at: string | null };
+type DashboardActivityRow = { id: string; matter_id: string | null; actor_id: string | null; action_type: string; description: string; created_at: string };
+
 export async function loadDashboardMatterSnapshots(input: {
   profile: Profile;
   mode: DashboardMode;
@@ -81,20 +89,21 @@ export async function loadDashboardMatterSnapshots(input: {
     return filterSnapshotsByMode(details.map(createSnapshotFromDetail), input.profile, input.mode);
   }
 
-  const { result } = await loadMattersWorkspace({
-    profile: input.profile,
-    searchParams: { pageSize: "100", sort: "needs_attention", archived: "false" },
-  });
-  const details = await Promise.all(
-    result.items.map(async (item) => {
-      try {
-        return await loadMatterDetail(item.id, input.profile);
-      } catch {
-        return null;
-      }
-    })
-  );
-  return filterSnapshotsByMode(details.filter((item): item is MatterDetail => Boolean(item)).map(createSnapshotFromDetail), input.profile, input.mode);
+  const items = [];
+  let page = 1;
+  let totalCount = Number.POSITIVE_INFINITY;
+  while (items.length < totalCount) {
+    const { result } = await loadMattersWorkspace({
+      profile: input.profile,
+      searchParams: { page: String(page), pageSize: "100", sort: "updated_desc", archived: "false" },
+    });
+    items.push(...result.items);
+    totalCount = result.totalCount;
+    if (result.items.length === 0) break;
+    page += 1;
+  }
+  const visibleItems = filterMatterItemsByMode(items, input.profile, input.mode);
+  return buildDashboardSnapshots(visibleItems);
 }
 
 export async function loadDashboardData(input: {
@@ -131,8 +140,7 @@ export async function loadDashboardData(input: {
       flags: b.flags,
       amountSought: b.snapshot.amountSought,
       daysSinceLastSubstantiveActivity: b.snapshot.daysSinceLastSubstantiveActivity,
-    }))
-    .slice(0, 8);
+    }));
 
   const needsFollowUp = byFlagTypes(matters, ["overdue_next_action", "missing_next_action", "stale_matter", "awaiting_response", "awaiting_client", "overdue_task", "new_referral_unreviewed"]);
   const missingInformation = byFlagCategories(matters, ["missing_information"]);
@@ -145,7 +153,10 @@ export async function loadDashboardData(input: {
   const assessmentSummaries = await loadAssessmentSummariesForMatterIds(snapshots.map((snapshot) => snapshot.id), input.profile);
   const highValueOpportunities = assessmentSummaries
     .filter((summary) => summary.current && summary.current.expectedNetValue > 0 && summary.current.viabilityScore >= 65 && summary.current.dataCompletenessPercentage >= 50)
-    .filter((summary) => !matters.find((matter) => matter.snapshot.id === summary.matterId)?.flags.some((flag) => flag.severity === "critical"))
+    // Only exclude for a flag that threatens the recovery itself (a critical deadline problem),
+    // not any unrelated administrative critical flag (e.g. an overdue next-action or task) —
+    // those should prompt follow-up, not hide the firm's best financial opportunities.
+    .filter((summary) => !matters.find((matter) => matter.snapshot.id === summary.matterId)?.flags.some((flag) => flag.severity === "critical" && flag.category === "deadline"))
     .sort((a, b) => (b.current?.expectedNetValue ?? 0) - (a.current?.expectedNetValue ?? 0))
     .slice(0, 5);
   const assessedMatterIds = new Set(assessmentSummaries.filter((summary) => summary.current).map((summary) => summary.matterId));
@@ -171,8 +182,8 @@ export async function loadDashboardData(input: {
       myTasks,
     }),
     priorityQueue,
-    needsFollowUp: needsFollowUp.slice(0, 5),
-    missingInformation: missingInformation.slice(0, 5),
+    needsFollowUp,
+    missingInformation,
     upcomingDeadlines,
     readyForDemand,
     newReferrals,
@@ -205,10 +216,125 @@ function mergeStoredFlagState(computed: TriageFlag[], stored: TriageFlag[], now:
 
 function filterSnapshotsByMode(snapshots: TriageMatterSnapshot[], profile: Profile, mode: DashboardMode) {
   if (mode === "firm" && (profile.role === "admin" || profile.role === "partner")) return snapshots;
-  return snapshots.filter((snapshot) => {
-    const assignedNames = [snapshot.assignedAttorneyName, snapshot.assignedStaffName, snapshot.assignedFirmUser].filter(Boolean);
-    return assignedNames.includes(profile.full_name);
-  });
+  return snapshots.filter((snapshot) => snapshot.assignedAttorneyId === profile.id || snapshot.assignedStaffId === profile.id);
+}
+
+function filterMatterItemsByMode(items: MatterListItem[], profile: Profile, mode: DashboardMode) {
+  if (mode === "firm" && (profile.role === "admin" || profile.role === "partner")) return items;
+  return items.filter((item) => item.assignedAttorneyId === profile.id || item.assignedStaffId === profile.id);
+}
+
+async function buildDashboardSnapshots(items: MatterListItem[]) {
+  if (items.length === 0) return [];
+  const ids = items.map((item) => item.id);
+  try {
+    const supabase = await createClient();
+    const [{ data: evidence }, { data: deadlines }, { data: tasks }, { data: events }, { data: activity }, { data: profiles }] = await Promise.all([
+      supabase.from("evidence_items").select("*").in("matter_id", ids),
+      supabase.from("deadlines").select("*").in("matter_id", ids).order("deadline_date"),
+      supabase.from("tasks").select("*").in("matter_id", ids).order("due_date"),
+      supabase.from("matter_events").select("*").in("matter_id", ids).order("occurred_at", { ascending: false }),
+      supabase.from("activity_logs").select("id,matter_id,actor_id,action_type,description,created_at").in("matter_id", ids).order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id,full_name"),
+    ]);
+    const profileMap = new Map(((profiles ?? []) as unknown as DashboardProfileRow[]).map((profile) => [profile.id, profile.full_name]));
+    const evidenceByMatter = groupBy((evidence ?? []) as unknown as DashboardEvidenceRow[], (row) => row.matter_id);
+    const deadlinesByMatter = groupBy((deadlines ?? []) as unknown as DashboardDeadlineRow[], (row) => row.matter_id);
+    const tasksByMatter = groupBy((tasks ?? []) as unknown as DashboardTaskRow[], (row) => row.matter_id);
+    const eventsByMatter = groupBy((events ?? []) as unknown as DashboardEventRow[], (row) => row.matter_id);
+    const activityByMatter = groupBy((activity ?? []) as unknown as DashboardActivityRow[], (row) => row.matter_id ?? "");
+
+    return items.map((item) => ({
+      ...createSnapshotFromListItem(item),
+      evidence: (evidenceByMatter.get(item.id) ?? []).map(mapDashboardEvidence),
+      deadlines: (deadlinesByMatter.get(item.id) ?? []).map((deadline) => mapDashboardDeadline(deadline, profileMap)),
+      tasks: (tasksByMatter.get(item.id) ?? []).map((task) => mapDashboardTask(task, profileMap)),
+      timeline: [
+        ...(eventsByMatter.get(item.id) ?? []).slice(0, 50).map((event) => mapDashboardEvent(event, profileMap)),
+        ...(activityByMatter.get(item.id) ?? []).slice(0, 50).map((entry) => mapDashboardActivity(entry, profileMap)),
+      ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)).slice(0, 50),
+    }));
+  } catch {
+    return items.map(createSnapshotFromListItem);
+  }
+}
+
+function mapDashboardEvidence(row: DashboardEvidenceRow): EvidenceItem {
+  return {
+    id: row.id,
+    evidenceType: row.evidence_type,
+    status: row.status,
+    dateRequested: row.date_requested,
+    dateReceived: row.date_received,
+    notes: row.notes,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapDashboardDeadline(row: DashboardDeadlineRow, profiles: Map<string, string>): DeadlineItem {
+  return {
+    id: row.id,
+    title: row.title,
+    deadlineType: row.deadline_type as DeadlineItem["deadlineType"],
+    deadlineDate: row.deadline_date,
+    isVerified: row.is_verified,
+    verifiedByName: row.verified_by ? profiles.get(row.verified_by) ?? null : null,
+    verifiedAt: row.verified_at,
+    assignedToName: row.assigned_to ? profiles.get(row.assigned_to) ?? null : null,
+    reminderDate: row.reminder_date,
+    notes: row.notes,
+  };
+}
+
+function mapDashboardTask(row: DashboardTaskRow, profiles: Map<string, string>): TaskItem {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    assignedToName: row.assigned_to ? profiles.get(row.assigned_to) ?? null : null,
+    dueDate: row.due_date,
+    priority: row.priority,
+    status: row.status,
+    completedAt: row.completed_at,
+    createdByName: row.created_by ? profiles.get(row.created_by) ?? null : null,
+  };
+}
+
+function mapDashboardEvent(row: DashboardEventRow, profiles: Map<string, string>): TimelineItem {
+  return {
+    id: row.id,
+    kind: "event",
+    occurredAt: row.occurred_at,
+    label: row.event_type.replaceAll("_", " "),
+    description: row.description,
+    actorName: row.recorded_by ? profiles.get(row.recorded_by) ?? null : null,
+    actorId: row.recorded_by,
+    source: row.source,
+    isStruckThrough: Boolean(row.struck_through_at),
+  };
+}
+
+function mapDashboardActivity(row: DashboardActivityRow, profiles: Map<string, string>): TimelineItem {
+  return {
+    id: row.id,
+    kind: "activity",
+    occurredAt: row.created_at,
+    label: row.action_type.replaceAll("_", " "),
+    description: row.description,
+    actorName: row.actor_id ? profiles.get(row.actor_id) ?? null : null,
+    actorId: row.actor_id,
+    source: "system_activity",
+    isStruckThrough: false,
+  };
+}
+
+function groupBy<T>(items: T[], key: (item: T) => string) {
+  const grouped = new Map<string, T[]>();
+  for (const item of items) {
+    const groupKey = key(item);
+    grouped.set(groupKey, [...(grouped.get(groupKey) ?? []), item]);
+  }
+  return grouped;
 }
 
 function byFlagTypes(matters: DashboardMatter[], types: TriageFlag["flagType"][]) {

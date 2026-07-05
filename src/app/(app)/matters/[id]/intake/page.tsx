@@ -18,7 +18,7 @@ export default async function ResumeIntakePage({ params }: ResumeIntakePageProps
   const { id } = await params;
   const [options, draft] = await Promise.all([getIntakeOptions(), getIntakeDraft(id)]);
 
-  const initialData = draft ?? { ...createEmptyIntake(), id };
+  const initialData = draft?.data ?? { ...createEmptyIntake(), id };
 
   return (
     <div className="space-y-6">
@@ -28,7 +28,7 @@ export default async function ResumeIntakePage({ params }: ResumeIntakePageProps
       />
 
       {options.permission.canCreateMatter ? (
-        <NewMatterIntake initialData={initialData} matterId={id} options={options} />
+        <NewMatterIntake initialData={initialData} initialLastSavedAt={draft?.lastAutosavedAt ?? undefined} matterId={id} options={options} />
       ) : (
         <EmptyState
           action={

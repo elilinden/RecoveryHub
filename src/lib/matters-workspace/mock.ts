@@ -127,7 +127,9 @@ export const developmentMatterItems: MatterListItem[] = matters.map((matter, ind
     currentIntakeStep: 3,
     lastAutosavedAt: null,
     assignedAdjusterName: matter.assignedAdjuster,
+    assignedAttorneyId: developmentProfileId(matter.assignedAttorney),
     assignedAttorneyName: matter.assignedAttorney,
+    assignedStaffId: matter.assignedPerson === matter.assignedAttorney ? null : developmentProfileId(matter.assignedPerson),
     assignedStaffName: matter.assignedPerson === matter.assignedAttorney ? null : matter.assignedPerson,
     assignedFirmUser: matter.assignedPerson,
     amountSought: matter.amountSought,
@@ -163,7 +165,9 @@ developmentMatterItems.push({
   currentIntakeStep: 2,
   lastAutosavedAt: "2026-07-03T13:45:00.000Z",
   assignedAdjusterName: "Owen Mercer",
+  assignedAttorneyId: developmentProfileId("Amara Ross"),
   assignedAttorneyName: "Amara Ross",
+  assignedStaffId: developmentProfileId("Nora Chen"),
   assignedStaffName: "Nora Chen",
   assignedFirmUser: "Nora Chen",
   amountSought: 51200,
@@ -200,6 +204,7 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       dateRequested: "2026-06-20",
       dateReceived: item.warnings.includes("missing_required_evidence") && !demandReadyEvidence ? null : "2026-06-25",
       notes: "Carrier payment ledger from fictional claim file.",
+      documentLinks: demandReadyEvidence ? [{ documentId: "northstar-ledger", title: "Payment ledger", displayFilename: "ledger.pdf" }] : [],
       updatedAt: item.lastUpdated,
     },
     {
@@ -209,6 +214,7 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       dateRequested: "2026-06-20",
       dateReceived: demandReadyEvidence ? "2026-06-24" : null,
       notes: "Fictional incident report status.",
+      documentLinks: demandReadyEvidence ? [{ documentId: "northstar-report", title: "Incident report", displayFilename: "incident-report.pdf" }] : [],
       updatedAt: item.lastUpdated,
     },
     {
@@ -218,6 +224,7 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       dateRequested: "2026-06-20",
       dateReceived: demandReadyEvidence ? "2026-06-25" : null,
       notes: "Fictional repair estimate status.",
+      documentLinks: [],
       updatedAt: item.lastUpdated,
     },
     {
@@ -227,6 +234,7 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       dateRequested: "2026-06-28",
       dateReceived: demandReadyEvidence ? "2026-06-29" : null,
       notes: "Waiting on scene photos from carrier contact.",
+      documentLinks: demandReadyEvidence ? [{ documentId: "northstar-photos", title: "Scene photographs", displayFilename: "photos.zip" }] : [],
       updatedAt: item.lastUpdated,
     },
     {
@@ -236,6 +244,7 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
       dateRequested: "2026-06-28",
       dateReceived: demandReadyEvidence ? "2026-06-29" : null,
       notes: "Fictional adverse insurance information.",
+      documentLinks: [],
       updatedAt: item.lastUpdated,
     },
   ];
@@ -328,8 +337,8 @@ export function getDevelopmentMatterDetail(id: string, profile: Profile): Matter
     adjusterEmail: item.assignedAdjusterName ? `${item.assignedAdjusterName.toLowerCase().replaceAll(" ", ".")}@example.test` : null,
     adjusterPhone: "555-0134",
     adjusterDepartment: "Recovery",
-    assignedAttorneyId: item.assignedAttorneyName,
-    assignedStaffId: item.assignedStaffName,
+    assignedAttorneyId: item.assignedAttorneyId,
+    assignedStaffId: item.assignedStaffId,
     dateReferred: item.lastUpdated,
     dateOfLoss: "2026-06-02",
     venue: "Cook County",
@@ -380,6 +389,12 @@ function mapStage(stage: string) {
   if (stage === "Under review") return "initial_review";
   if (stage === "Closed") return "closed";
   return "investigation";
+}
+
+function developmentProfileId(name: string | null) {
+  if (!name) return null;
+  if (name === "Eli Linden") return "development-profile";
+  return `development-profile-${name.toLowerCase().replaceAll(" ", "-")}`;
 }
 
 export function daysSince(value: string | null) {

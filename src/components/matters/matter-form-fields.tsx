@@ -1,10 +1,12 @@
+import type { ChangeEvent } from "react";
+
 import { Input } from "@/components/ui/input";
 
-export function TextField({ label, name, value }: { label: string; name: string; value: string }) {
+export function TextField({ label, maxLength, name, onChange, value }: { label: string; maxLength?: number; name: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; value: string }) {
   return (
     <label className="min-w-0 space-y-1 text-sm font-medium text-foreground">
       <span>{label}</span>
-      <Input defaultValue={value} name={name} />
+      <Input defaultValue={value} maxLength={maxLength} name={name} onChange={onChange} />
     </label>
   );
 }
